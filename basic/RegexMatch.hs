@@ -1,8 +1,7 @@
 
-import RegParser
 import Types
-import MakeNFA
-import NFAtoDFA
+import MakeNFA (makeNfa)
+import NFAtoDFA (nfaToDfa)
 
 
 regexFullMatch :: ([Char], [Char]) -> Bool

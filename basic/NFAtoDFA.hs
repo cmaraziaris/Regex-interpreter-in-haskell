@@ -1,8 +1,8 @@
 
 module NFAtoDFA (nfaToDfa) where
 
-import RegParser
 import Types
+import RegParser (parseRegexpr, RegExpr(..))
 
 -- import MakeNFA -- TODO : rm 
 -- import Debug.Trace

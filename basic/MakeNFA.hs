@@ -1,19 +1,11 @@
 
 module MakeNFA (makeNfa) where
 
-import RegParser
 import Types
+import RegParser (parseRegexpr, RegExpr(..))
+import Utilities (mergeSort, removeDuplicates)
 
 type AvailableState = StateId
-
--- TODO: Replace with merge-sort
-quicksort1 :: (Ord a) => [a] -> [a]
-quicksort1 [] = []
-quicksort1 (x:xs) =
-  let smallerSorted = quicksort1 [a | a <- xs, a < x]
-      biggerSorted = quicksort1 [a | a <- xs, a > x]  -- !! Don't keep equals
-  in  smallerSorted ++ [x] ++ biggerSorted
-
 
 createNfaRec :: AvailableState -> RegExpr -> (Fsa, AvailableState)
 
@@ -60,5 +52,5 @@ makeNfa str = (states, inputs, transitions, firstState, lastStates)
     where 
       ((_, _, transitions, firstState, lastStates), nextAvailState) = createNfaRec 1 (parseRegexpr str)
       states = [1..nextAvailState-1]
-      inputs = quicksort1 (filter isValidInput str)
+      inputs = removeDuplicates (==) . mergeSort . filter isValidInput $ str
       isValidInput c = not ( c == '_' || c == '|' || c == '(' || c == ')' || c == '*' || c == ' ' )
