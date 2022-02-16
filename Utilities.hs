@@ -9,6 +9,7 @@ module Utilities
     myElem,
     myFst,
     mySnd,
+    myZip,
     mergeSortBy,
     mergeSort,
     removeDuplicates,
@@ -72,6 +73,10 @@ myFst (a,_) = a
 mySnd :: (a, b) -> b
 mySnd (_,b) = b
 
+myZip :: [a] -> [b] -> [(a,b)]
+myZip [] _ = []
+myZip _ [] = []
+myZip (x:xs) (y:ys) = (x,y) : myZip xs ys
 
 removeDuplicatesInner :: (Eq a) => (a -> a -> Bool) -> [a] -> MyMaybe a -> [a]
 removeDuplicatesInner cmp_eq [] _ = [] 

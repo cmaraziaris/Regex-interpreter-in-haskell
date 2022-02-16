@@ -13,7 +13,7 @@
 
 import RegParser (parseRegexpr, RegExpr(EmptyChar, Kleene, Concat, Union, AnyLetter, Letter) )
 import Types
-
+import Utilities
 
 
 -- makeNfa = snd. makeNfa' . snd. simplifyRegex. parseRegexpr 
@@ -26,8 +26,9 @@ type BranchingFlag = Bool -- In the recursion step of the construction of the CF
 type LastDataInfo = (Int, Int) -- Starting position and |last(F)| are saved here. Corresponding to lastdata array/list
 type FirstDataInfo = (Int, Int) -- Starting position and |first(F)| are saved here. Corresponding to firstdata array/list
 type Position = Int             -- corresponds to a character but for the linearized regex
-type PositionsList = [(Position, Position)] -- a list of all the positions a subtree or a regex has
-                                            -- a tuple says it has all the integers in the closed set [a,b] where a,b are the elements of the tuple
+type NumOfPositions = Int
+type PositionsList = (NumOfPositions ,(Position, Position)) -- the number of positions and wich positions a regex has
+                                            -- the position tuple says it has all the integers in the closed set [a,b] where a,b are the elements of the tuple
 type RegInfo = (ContainsE, FirstDataInfo, LastDataInfo, PositionsList, BranchingFlag) -- a summary of information of a subexpression
                                                                                       -- used in the CFS system construction
 
@@ -39,25 +40,16 @@ data ModRegExpr = Num (RegInfo, Int) -- replaces the characters and wildcard wit
              | ModUnion  (RegInfo, (ModRegExpr,ModRegExpr))
              deriving(Eq, Show)
 
--- algebraic type used once in the construction of the simplified linearised regex and in the construction of the lastdata and firstdata structures
-data ModExpr = NumE Int
-             | EmptyCharE
-             | KleeneE (ContainsE, PositionsList, ModExpr)
-             | ConcatE (ContainsE, PositionsList, (ModExpr, ModExpr))
-             | UnionE  (ContainsE, PositionsList, (ModExpr, ModExpr))
-             deriving(Eq, Show)
-
-
 
 -- Extracts the ContainsE information from a ModExpr regex
-getModContainsE :: ModExpr -> ContainsE
+getModContainsE :: ModRegExpr -> ContainsE
 --getModContainsE (LetterE _) = False
 --getModContainsE AnyLetterE = False
-getModContainsE (NumE _) = False
-getModContainsE EmptyCharE = True
-getModContainsE (KleeneE (_, _, _)) = True
-getModContainsE (ConcatE (a, _, _)) = a
-getModContainsE (UnionE  (a, _, _)) = a
+getModContainsE (Num _) = False
+getModContainsE ModEmptyChar = True
+getModContainsE (ModKleene (_, _)) = True
+getModContainsE (ModConcat ((a,_,_,_,_), _)) = a
+getModContainsE (ModUnion  ((a,_,_,_,_), _)) = a
 
 ----------------------------------------------------------------------------------------------------------------------------------
 ----------------------------------- Step 1: Simplification and linearisation of the regular expression ---------------------------
@@ -72,62 +64,59 @@ getModContainsE (UnionE  (a, _, _)) = a
 type NextInt = Int -- The int which will be assigned to the next 
 type LinearisationMap = [(Int, Char)] -- what character every Int represents
 
-my3Thr :: (a,b,c) -> c
-my3Thr (_,_,c) = c
-my3Snd :: (a,b,c) -> b
-my3Snd (_,b,_) = b
-my3Fst :: (a,b,c) -> a
-my3Fst (a,_,_) = a
-
+produceRegInfo :: ContainsE -> PositionsList -> RegInfo
+produceRegInfo containsE posList = (containsE, (0,0), (0,0), posList, False)
 
 -- An initialisation of an argument before the main procedure
-simplifyRegexInitialisation :: RegExpr -> (LinearisationMap, NextInt, ModExpr)
+simplifyRegexInitialisation :: RegExpr -> (LinearisationMap, NextInt, ModRegExpr)
 simplifyRegexInitialisation regExpr = simplifyRegex regExpr 1
 
-simplifyRegex :: RegExpr -> NextInt -> (LinearisationMap, NextInt, ModExpr)
+simplifyRegex :: RegExpr -> NextInt -> (LinearisationMap, NextInt, ModRegExpr)
 
 -- (reg*)* and reg* produce the same language
 simplifyRegex (Kleene (Kleene reg)) n = simplifyRegex (Kleene reg) n
 
 -- (e | e)* == e, (e | reg)* == (reg | e)* == reg* where e is the empty string. Check for those cases
 simplifyRegex (Kleene ( Union (reg1, reg2))) n = case reg of
-        EmptyCharE ->  (list, nextInt, EmptyCharE)
-        (KleeneE a) -> (list, nextInt, KleeneE a)
-        (UnionE (_, _,(reg1', reg2'))) ->   if getModContainsE reg1' then (list, nextInt, KleeneE (True, [(n, nextInt-1)], reg2')) else 
-                                            if getModContainsE reg2' then (list, nextInt, KleeneE (True, [(n, nextInt-1)], reg1')) else (list, nextInt, KleeneE (True, [(n, nextInt-1)], reg))
-        _ ->  (list, nextInt, KleeneE (True, [(n,nextInt-1)], reg))
+        ModEmptyChar ->  (list, nextInt, ModEmptyChar)
+        (ModKleene a) -> (list, nextInt, ModKleene a)
+        (ModUnion (_, (reg1', reg2'))) ->   if getModContainsE reg1' then (list, nextInt, ModKleene (regInfo, reg2')) else 
+                                            if getModContainsE reg2' then (list, nextInt, ModKleene (regInfo, reg1')) else (list, nextInt, ModKleene (regInfo, reg))
+        _ ->  (list, nextInt, ModKleene (regInfo, reg))
         where   (list, nextInt, reg) = simplifyRegex (Union (reg1, reg2)) n
+                regInfo = produceRegInfo True (nextInt - n,(n, nextInt-1))
 
 -- e* == e, where e is the empty string. Check for this case
 simplifyRegex (Kleene reg) n = case simplifyRegex reg n of
-                ([], nextInt, EmptyCharE) -> ([], nextInt, EmptyCharE)
-                (list, nextInt, reg') -> (list, nextInt, KleeneE (True, [(n, nextInt-1)], reg'))
+                ([], nextInt, ModEmptyChar) -> ([], nextInt, ModEmptyChar)
+                (list, nextInt, reg') -> (list, nextInt, ModKleene (produceRegInfo True (nextInt - n,(n, nextInt-1)), reg'))
 
 -- e concat reg = reg concat e = reg. Check for those cases 
 simplifyRegex (Concat (reg1, reg2)) n = case reg1' of
-            EmptyCharE -> (list2, nextInt', reg2')
+            ModEmptyChar -> (list2, nextInt', reg2')
             _ -> case reg2' of
-                    EmptyCharE -> (list1, nextInt', reg1')
-                    reg2' -> (list1 ++ list2, nextInt', ConcatE (isE, [(n, nextInt'-1)], (reg1', reg2')))
+                    ModEmptyChar -> (list1, nextInt', reg1')
+                    reg2' -> (list1 ++ list2, nextInt', ModConcat (produceRegInfo isE (nextInt' - n,(n, nextInt'-1)), (reg1', reg2')))
             where   (list1, nextInt , reg1') = simplifyRegex reg1 n
                     (list2, nextInt', reg2') = simplifyRegex reg2 nextInt
                     isE = getModContainsE reg1' && getModContainsE reg2'
 
 -- if reg produces e, then: (e | reg) == (reg | e) == reg. Check for those cases
 simplifyRegex (Union (reg1, reg2)) n = case reg1' of
-            EmptyCharE -> if getModContainsE reg2' then (list2, nextInt', reg2') else (list2, nextInt', UnionE (True, [(n, nextInt'-1)], (EmptyCharE, reg2')))
+            ModEmptyChar -> if getModContainsE reg2' then (list2, nextInt', reg2') else (list2, nextInt', ModUnion (regInfo, (ModEmptyChar, reg2')))
             _ -> case reg2' of
-                EmptyCharE -> if getModContainsE reg1' then (list1, nextInt , reg1') else (list1, nextInt', UnionE (True, [(n, nextInt'-1)], (reg1', EmptyCharE)))
-                _ -> (list1 ++ list2, nextInt', UnionE (isE, [(n, nextInt'-1)], (reg1', reg2')))
+                ModEmptyChar -> if getModContainsE reg1' then (list1, nextInt' , reg1') else (list1, nextInt', ModUnion (regInfo, (reg1', ModEmptyChar)))
+                _ -> (list1 ++ list2, nextInt', ModUnion (regInfo, (reg1', reg2')))
             where   (list1, nextInt , reg1') = simplifyRegex reg1 n
                     (list2, nextInt', reg2') = simplifyRegex reg2 nextInt
                     isE = getModContainsE reg1' || getModContainsE reg2'
+                    regInfo = produceRegInfo isE (nextInt' - n,(n, nextInt'-1))
 
-simplifyRegex EmptyChar n = ([], n, EmptyCharE)
+simplifyRegex EmptyChar n = ([], n, ModEmptyChar)
 
-simplifyRegex AnyLetter n = ([(n, '.')], n+1, NumE n)
+simplifyRegex AnyLetter n = ([(n, '.')], n+1, Num (produceRegInfo False (1,(n,n)),n))
 
-simplifyRegex (Letter a) n = ([(n, a)], n+1, NumE n)
+simplifyRegex (Letter a) n = ([(n, a)], n+1, Num (produceRegInfo False (1,(n,n)),n))
 
 simplifyRegex _ _ = error "Invalid simplifyRegex argument" -- It's invalid to get EndReg, NotEndReg in a input regex
 
@@ -147,7 +136,7 @@ getRegInfo (Num (regInfo,_)) = regInfo
 getRegInfo (ModKleene (regInfo,_)) = regInfo
 getRegInfo (ModConcat (regInfo,_)) = regInfo
 getRegInfo (ModUnion  (regInfo,_)) = regInfo
-getRegInfo _ = error "False argument in getRegInfo: Given ModEmptyChar which has RegInfo"
+getRegInfo _ = error "False argument in getRegInfo: Given ModEmptyChar which has no RegInfo"
 
 getFdInfo :: ModRegExpr -> FirstDataInfo
 getFdInfo (Num ((_,fdInfo,_,_,_),_)) = fdInfo
@@ -163,159 +152,230 @@ getLdInfo (ModConcat ((_,_,ldInfo,_,_),_)) = ldInfo
 getLdInfo (ModUnion  ((_,_,ldInfo,_,_),_)) = ldInfo
 getLdInfo _ = error "False argument in getLdInfo: Given ModEmptyChar which has no LastDataInfo"
 
-getContainsE :: ModRegExpr -> ContainsE
---getModContainsE (LetterE _) = False
---getModContainsE AnyLetterE = False
-getContainsE (Num _) = False
-getContainsE ModEmptyChar = True
-getContainsE (ModKleene _) = True
-getContainsE (ModConcat ((a,_,_,_,_), _)) = a
-getContainsE (ModUnion  ((a,_,_,_,_), _)) = a
 
---Num (RegInfo, Int) -- replaces the characters and wildcard with Integers
---ModEmptyChar
---ModKleene (RegInfo, ModRegExpr)
---ModConcat (RegInfo, (ModRegExpr,ModRegExpr))
---ModUnion  (RegInfo, (ModRegExpr,ModRegExpr))
--- type RegInfo = (ContainsE, FirstDataInfo, LastDataInfo, PositionsList, BranchingFlag)
-
-
-type TreePositions  = [Position]
-type TreesPositions = [TreePositions]
+type FirstData = [Position]
+type LastData = [Position]
 
 -- fd root constructs the firstdata structure by finding the the FirstDataInfo for each node in the subtree and returns the a list
 -- of lists of the positions of the subtrees defined for the construction of the firstdata structure in reverse order
 -- takes as argument a syntax tree of a regular expression and an integer nextInt 
-fdRoot :: ModExpr -> NextInt -> (ModRegExpr, NextInt, TreesPositions)
+fdRoot :: ModRegExpr -> NextInt -> FirstData -> (ModRegExpr, NextInt, FirstData)
 
-fdRoot (KleeneE (containsE, posList, modReg)) n = (ModKleene ((True,a2,a3,a4,a5), modReg''), nextInt', newTreePos:treePos) 
-    where   (modReg', nextInt, treePos) = fdFirstStage modReg n
-            (modReg'', nextInt', newTreePos) = fdSecondStage modReg' nextInt
-            (_,a2,a3,a4,a5) = getRegInfo modReg''
+fdRoot (ModKleene (_, modReg)) n fd = (ModKleene ((True,a2,a3,a4,False), modReg''), nextInt', fd2) 
+    where   (modReg', nextInt, fd1) = fdFirstStage modReg n fd
+            (modReg'', nextInt', fd2) = fdSecondStage modReg' nextInt fd1
+            (_,a2,a3,a4,_) = getRegInfo modReg''
 
-fdRoot (ConcatE (containsE, posList, (modReg1, modReg2))) n 
-    | getModContainsE modReg1 = let (modReg2', nextInt2, treesPos2) = fdFirstStage modReg2 n
-                                    (modReg1', nextInt1, treesPos1) = fdFirstStage modReg1 nextInt2
-                                    (modReg1'', nextInt1', newTreePos1) = fdSecondStage modReg1' nextInt1
-                                    (modReg2'', nextInt2', newTreePos2) = fdSecondStage modReg2' nextInt1' 
-                                    (a1,(a21,a22),a3,a4,a5) = getRegInfo modReg1''
-                                    (b1,(b21,b22),b3,b4,b5) = getRegInfo modReg2''  in
-                                    (ModConcat ((containsE, (a21, a22+b22),a3,posList,False), (modReg1'', modReg2'')), nextInt2', (newTreePos1 ++ newTreePos2):(treesPos1 ++ treesPos2))
+fdRoot (ModConcat ((containsE, _,_,posList,_), (modReg1, modReg2))) n fd
+    | getModContainsE modReg1 = let (modReg2', nextInt2, fd1) = fdFirstStage modReg2 n fd
+                                    (modReg1', nextInt1, fd2) = fdFirstStage modReg1 nextInt2 fd1
+                                    (modReg1'', nextInt1', fd3) = fdSecondStage modReg1' nextInt1  fd2
+                                    (modReg2'', nextInt2', fd4) = fdSecondStage modReg2' nextInt1' fd3
+                                    
+                                    (_,(a21,a22),a3,_,_) = getRegInfo modReg1''
+                                    (_,(_,b22),b3,_,_) = getRegInfo modReg2''  in
+                                    (ModConcat ((containsE, (a21, a22+b22),a3,posList,False), (modReg1'', modReg2'')), nextInt2', fd4)
     
-    | otherwise = let   (modReg2', nextInt, treesPos2) = fdRoot modReg2 n
-                        (modReg1', nextInt', treesPos1) = fdFirstStage modReg1 nextInt
-                        (modReg1'', nextInt'', newTreesPos)  = fdSecondStage modReg1' nextInt' 
-                        (a1,a2,a3,a4,a5) = getRegInfo modReg1'' in
-                        (ModConcat ((containsE, a2, a3, posList, a5), (modReg1'', modReg2')), nextInt'', newTreesPos:(treesPos1 ++ treesPos2))
+    | otherwise = let   (modReg1', nextInt, fd1)  = fdFirstStage modReg1 n fd 
+                        (modReg1'', nextInt', fd2) = fdSecondStage modReg1' nextInt fd1
+                        (modReg2', nextInt'', fd3) = fdRoot modReg2 nextInt' fd2
+                        (_,a2,a3,_,_) = getRegInfo modReg1'' in
+                        (ModConcat ((containsE, a2, a3, posList, False), (modReg1'', modReg2')), nextInt'', fd3)
 
 
-fdRoot (UnionE (containsE, posList, (modReg1, modReg2))) n = case modReg1 of
-    EmptyCharE -> (ModUnion ((True, (b21,b22),b3,posList,b5), (modReg1'',modReg2'')), nextInt2', newTreePos2:treesPos2)
+fdRoot (ModUnion ((containsE, _,_,posList,_), (modReg1, modReg2))) n fd = case modReg1 of
+    ModEmptyChar -> (ModUnion ((True, (b21,b22),b3,posList,False), (modReg1'',modReg2'')), nextInt2', fd4)
     _ ->   case modReg2 of
-        EmptyCharE -> (ModUnion ((True, (a21,a22),a3,posList,a5), (modReg1'',modReg2'')), nextInt2', newTreePos1:treesPos1)
-        _ -> (ModUnion ((containsE, (a21, a22+b22),a3,posList,False), (modReg1'', modReg2'')), nextInt2', (newTreePos1 ++ newTreePos2):(treesPos1 ++ treesPos2))
+        ModEmptyChar -> (ModUnion ((True, (a21,a22),a3,posList,False), (modReg1'', modReg2'')), nextInt2', fd4)
+        _ -> (ModUnion ((containsE, (a21, a22+b22),a3, posList,False), (modReg1'', modReg2'')), nextInt2', fd4)
     
-    where   (modReg2', nextInt2, treesPos2) = fdFirstStage modReg2 n
-            (modReg1', nextInt1, treesPos1) = fdFirstStage modReg1 nextInt2
-            (modReg1'', nextInt1', newTreePos1) = fdSecondStage modReg1' nextInt1
-            (modReg2'', nextInt2', newTreePos2) = fdSecondStage modReg2' nextInt1' 
-            (a1,(a21,a22),a3,a4,a5) = getRegInfo modReg1''
-            (b1,(b21,b22),b3,b4,b5) = getRegInfo modReg2''
+    where   (modReg2', nextInt2, fd1) = fdFirstStage modReg2 n fd
+            (modReg1', nextInt1, fd2) = fdFirstStage modReg1  nextInt2  fd1
+            (modReg1'', nextInt1', fd3) = fdSecondStage  modReg1' nextInt1  fd2
+            (modReg2'', nextInt2', fd4) = fdSecondStage  modReg2' nextInt1' fd3
+            (_,(a21,a22),a3,_,_) = getRegInfo modReg1''
+            (_,(b21,b22),b3,_,_) = getRegInfo modReg2''
                                     
 
 
-fdRoot (NumE a) n = (Num ((False, (n,1), (0,0), [(a,a)],False),a), n+1, [[a]])
+fdRoot (Num (_,a)) n fd = (Num ((False, (n,1), (0,0), (1,(a,a)),False),a), n-1, a:fd)
 
-fdRoot EmptyCharE n = (ModEmptyChar, n, [])
+fdRoot ModEmptyChar n fd = (ModEmptyChar, n, fd)
 
 ----------------------------------------------------------------------------------------------------------------------------------
 
-fdFirstStage :: ModExpr -> NextInt -> (ModRegExpr, NextInt, TreesPositions)
+fdFirstStage :: ModRegExpr -> NextInt -> FirstData -> (ModRegExpr, NextInt, FirstData)
 
-fdFirstStage (KleeneE (containsE, posList, modReg)) n = (ModKleene ((True, a2,a3,posList, a5), modReg'), nextInt, treesPos)
-        where   (modReg', nextInt, treesPos) = fdFirstStage modReg n
-                --(modReg'', nextInt', newTreePos) = fdSecondStage modReg' nextInt
-                (a1,a2,a3,a4,a5) = getRegInfo modReg'
+fdFirstStage (ModKleene (_, modReg)) n fd = (ModKleene ((True, b2,b3,b4, b5), modReg'), nextInt, fd1)
+        where   (modReg', nextInt, fd1) = fdFirstStage modReg n fd
+                (_,b2,b3,b4,b5) = getRegInfo modReg'
 
-fdFirstStage (ConcatE (containsE, posList, (modReg1, modReg2))) n 
-    | getModContainsE modReg1 = let (modReg2', nextInt2, treesPos2) = fdFirstStage modReg2 n
-                                    (modReg1', nextInt1, treesPos1) = fdFirstStage modReg1 nextInt2
-                                    --(modReg1'', nextInt1', newTreePos1) = fdSecondStage modReg1' nextInt1
-                                    --(modReg2'', nextInt2', newTreePos2) = fdSecondStage modReg2' nextInt1' 
-                                    (a1,(a21,a22),a3,a4,a5) = getRegInfo modReg1'
-                                    (b1,(b21,b22),b3,b4,b5) = getRegInfo modReg2'  in
-                                    (ModConcat ((containsE, (a21, a22+b22),a3,posList,False), (modReg1', modReg2')), nextInt1, treesPos1 ++ treesPos2)
+fdFirstStage (ModConcat ((containsE, _,_,posList,_), (modReg1, modReg2))) n fd
+    | getModContainsE modReg1 = let (modReg1', nextInt,  fd1) = fdFirstStage modReg1 n fd
+                                    (modReg2', nextInt', fd2) = fdFirstStage modReg2 nextInt fd1
+                                    (_,( _  ,b22),b3,_,_) = getRegInfo modReg1'
+                                    (_,(c21 ,c22),_,_,_) = getRegInfo modReg2'  in
+                                    (ModConcat ((containsE, (c21, b22+c22),b3,posList,False), (modReg1', modReg2')), nextInt', fd2)
     
-    | otherwise = let   (modReg2', nextInt, treesPos2) = fdRoot modReg2 n
-                        (modReg1', nextInt', treesPos1) = fdFirstStage modReg1 nextInt
-                        --(modReg1'', nextInt'', newTreesPos)  = fdSecondStage modReg1' nextInt' 
-                        (a1,a2,a3,a4,a5) = getRegInfo modReg1' in
-                        (ModConcat ((containsE, a2, a3, posList, a5), (modReg1', modReg2')), nextInt', treesPos1 ++ treesPos2)
+    | otherwise = let   (modReg1', nextInt, fd1)  = fdFirstStage modReg1 n fd
+                        (_,b2,b3,_,_) = getRegInfo modReg1' in
+                        (ModConcat ((containsE, b2, b3, posList, False), (modReg1', modReg2)), nextInt, fd1)
 
 
-fdFirstStage (UnionE (containsE, posList, (modReg1, modReg2))) n = case modReg1 of
-    EmptyCharE -> (ModUnion ((True, (b21,b22),b3,posList,b5), (modReg1',modReg2')), nextInt1, treesPos2)
+fdFirstStage (ModUnion ((containsE, _,_,posList,_), (modReg1, modReg2))) n fd = case modReg1 of
+    ModEmptyChar -> (ModUnion ((True, (c21,c22),c3,posList,False), (modReg1',modReg2')), nextInt2, fd2)
     _ ->   case modReg2 of
-        EmptyCharE -> (ModUnion ((True, (a21,a22),a3,posList,a5), (modReg1',modReg2')), nextInt1, treesPos1)
-        _ -> (ModUnion ((containsE, (a21, a22+b22),a3,posList,False), (modReg1', modReg2')), nextInt1, treesPos1 ++ treesPos2)
+        ModEmptyChar -> (ModUnion ((True, (b21,b22), b3,posList,False), (modReg1', modReg2')), nextInt2, fd2)
+        _ -> (ModUnion ((containsE, (c21, b22+c22) , b3,posList,False), (modReg1', modReg2')), nextInt2, fd2)
     
-    where   (modReg2', nextInt2, treesPos2) = fdFirstStage modReg2 n
-            (modReg1', nextInt1, treesPos1) = fdFirstStage modReg1 nextInt2
-            --(modReg1'', nextInt1', newTreePos1) = fdSecondStage modReg1' nextInt1
-            --(modReg2'', nextInt2', newTreePos2) = fdSecondStage modReg2' nextInt1' 
-            (a1,(a21,a22),a3,a4,a5) = getRegInfo modReg1'
-            (b1,(b21,b22),b3,b4,b5) = getRegInfo modReg2'
+    where   (modReg1', nextInt1, fd1) = fdFirstStage modReg1 n fd
+            (modReg2', nextInt2, fd2) = fdFirstStage modReg2 nextInt1 fd1
+            (_,(b21,b22),b3,_,_) = getRegInfo modReg1'
+            (_,(c21,c22),c3,_,_) = getRegInfo modReg2'
                                     
 
+  
+fdFirstStage (Num (_,a)) n fd = (Num ((False, (n,1), (0,0), (1,(a,a)), False),a), n-1, a:fd)
 
-fdFirstStage (NumE a) n = (Num ((False, (0,0), (0,0), [(a,a)], False),a), n, [])
-
-fdFirstStage EmptyCharE n = (ModEmptyChar, n, [])
-
+fdFirstStage ModEmptyChar n fd = (ModEmptyChar, n, fd)
 
 ----------------------------------------------------------------------------------------------------------------------------------
 
-fdSecondStage :: ModRegExpr -> NextInt -> (ModRegExpr, NextInt, TreePositions)
+fdSecondStage :: ModRegExpr -> NextInt -> FirstData -> (ModRegExpr, NextInt, FirstData)
 
-fdSecondStage (ModKleene ((a1,a2,a3,a4,a5), modReg)) n = (ModKleene ((True, b2,a3,a4, a5), modReg'), nextInt, newTreePos)
-        where   --(modReg', nextInt, treesPos) = fdFirstStage modReg n
-                (modReg', nextInt, newTreePos) = fdSecondStage modReg n
-                (b1,b2,b3,b4,b5) = getRegInfo modReg'
+fdSecondStage (ModKleene (_, modReg)) n fd = (ModKleene ((True, a2,a3,a4, False), modReg'), nextInt, fd1)
+        where   (modReg', nextInt, fd1) = fdSecondStage modReg n fd
+                (_,a2,a3,a4,_) = getRegInfo modReg'
 
-fdSecondStage (ModConcat ((a1,a2,a3,a4,a5), (modReg1, modReg2))) n 
-    | getContainsE modReg1 = let    --(modReg2', nextInt2, treesPos2) = fdFirstStage modReg2 n
-                                    --(modReg1', nextInt1, treesPos1) = fdFirstStage modReg1 nextInt2
-                                    (modReg1', nextInt, newTreePos1) = fdSecondStage modReg1 n
-                                    (modReg2', nextInt', newTreePos2) = fdSecondStage modReg2 nextInt
-                                    (b1,(b21,b22),b3,b4,b5) = getRegInfo modReg1'
-                                    (c1,(c21,c22),c3,c4,c5) = getRegInfo modReg2'  in
-                                    (ModConcat ((a1, (b21, b22+c22),a3,a4,False), (modReg1', modReg2')), nextInt', newTreePos1 ++ newTreePos2)
+fdSecondStage (ModConcat ((a1,a2,a3,a4,_), (modReg1, modReg2))) n fd = 
+                                let fdFunction = if getModContainsE modReg1 then fdSecondStage else fdRoot
+                                    (modReg1', nextInt1, fd1) = fdSecondStage modReg1 n fd
+                                    (modReg2', nextInt2, fd2) = fdFunction modReg2 nextInt1 fd1 in
+                                    (ModConcat ((a1, a2,a3,a4,False), (modReg1', modReg2')), nextInt2, fd2)
+
+fdSecondStage (ModUnion (regInfo, (modReg1, modReg2))) n fd = (ModUnion (regInfo, (modReg1',modReg2')), nextInt2, fd2)
     
-    | otherwise = let   --(modReg2', nextInt, treesPos2) = fdRoot modReg2 n
-                        --(modReg1', nextInt, treesPos1) = fdFirstStage modReg1 nextInt
-                        (modReg1', nextInt, newTreePos)  = fdSecondStage modReg1 n 
-                        (b1,b2,b3,b4,b5) = getRegInfo modReg1' in
-                        (ModConcat ((a1, b2, a3, a4, a5), (modReg1', modReg2)), nextInt, newTreePos)
+    where   (modReg1', nextInt1, fd1) = fdSecondStage modReg1 n fd
+            (modReg2', nextInt2, fd2) = fdSecondStage modReg2 nextInt1 fd1
+
+fdSecondStage (Num a) n fd = (Num a, n, fd)
+
+fdSecondStage ModEmptyChar n fd = (ModEmptyChar, n, fd)
 
 
-fdSecondStage (ModUnion ((a1,a2,a3,a4,a5), (modReg1, modReg2))) n = case modReg1 of
-    ModEmptyChar -> (ModUnion ((True, (c21,c22),b3,a4,b5), (modReg1',modReg2')), nextInt2, newTreePos2)
+----------------------------------------------------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------------------------------------
+
+
+-- Now create the Lastdata structure with almost the same logic as the construction of the the FirstData structure 
+
+
+
+-- fd root constructs the firstdata structure by finding the the FirstDataInfo for each node in the subtree and returns the a list
+-- of lists of the positions of the subtrees defined for the construction of the firstdata structure in reverse order
+-- takes as argument a syntax tree of a regular expression and an integer nextInt 
+ldRoot :: ModRegExpr -> NextInt -> LastData -> (ModRegExpr, NextInt, LastData)
+
+ldRoot (ModKleene (_, modReg)) n ld = (ModKleene ((True,a2,a3,a4,False), modReg''), nextInt', ld2) 
+    where   (modReg', nextInt, ld1) = ldFirstStage modReg n ld
+            (modReg'', nextInt', ld2) = ldSecondStage modReg' nextInt ld1
+            (_,a2,a3,a4,_) = getRegInfo modReg''
+
+ldRoot (ModConcat ((containsE, ldInfo,_,posList,_), (modReg1, modReg2))) n ld
+    | getModContainsE modReg2 = let (modReg2', nextInt2, ld1) = ldFirstStage modReg2 n ld
+                                    (modReg1', nextInt1, ld2) = ldFirstStage modReg1 nextInt2 ld1
+                                    (modReg2'', nextInt2', ld3) = ldSecondStage modReg2' nextInt1  ld2
+                                    (modReg1'', nextInt1', ld4) = ldSecondStage modReg1' nextInt2' ld3
+                                    
+                                    (_,_,(a31,a32),_,_) = getRegInfo modReg1''
+                                    (_,_,(b31,b32),_,_) = getRegInfo modReg2''  in
+                                    (ModConcat ((containsE, ldInfo, (a31, a32+b32),posList,False), (modReg1'', modReg2'')), nextInt1', ld4)
+    
+    | otherwise = let   (modReg2', nextInt, ld1)  = ldFirstStage modReg2 n ld 
+                        (modReg2'', nextInt', ld2) = ldSecondStage modReg2' nextInt ld1
+                        (modReg1', nextInt'', ld3) = ldRoot modReg1 nextInt' ld2
+                        (_,_,a3,_,_) = getRegInfo modReg2'' in
+                        (ModConcat ((containsE, ldInfo, a3, posList, False), (modReg1', modReg2'')), nextInt'', ld3)
+
+
+ldRoot (ModUnion ((containsE, ldInfo,_,posList,_), (modReg1, modReg2))) n ld = case modReg1 of
+    ModEmptyChar -> (ModUnion ((True, ldInfo, (b31,b32),posList,False), (modReg1'',modReg2'')), nextInt1', ld4)
     _ ->   case modReg2 of
-        ModEmptyChar -> (ModUnion ((True, (b21,b22),a3,a4,a5), (modReg1',modReg2')), nextInt2, newTreePos1)
-        _ -> (ModUnion ((a1, (b21, b22+c22),a3,a4,a5), (modReg1', modReg2')), nextInt2, newTreePos1 ++ newTreePos2)
+        ModEmptyChar -> (ModUnion ((True, ldInfo, (a31,a32),posList,False), (modReg1'', modReg2'')), nextInt1', ld4)
+        _ -> (ModUnion ((containsE, ldInfo, (a31, a32+b32), posList,False), (modReg1'', modReg2'')), nextInt1', ld4)
     
-    where   --(modReg2', nextInt2, treesPos2) = fdFirstStage modReg2 n
-            --(modReg1', nextInt1, treesPos1) = fdFirstStage modReg1 nextInt2
-            (modReg1', nextInt1, newTreePos1) = fdSecondStage modReg1 n
-            (modReg2', nextInt2, newTreePos2) = fdSecondStage modReg2 nextInt1 
-            (b1,(b21,b22),b3,b4,b5) = getRegInfo modReg1'
-            (c1,(c21,c22),c3,c4,c5) = getRegInfo modReg2'
+    where   (modReg2', nextInt2, ld1) = ldFirstStage modReg2 n ld
+            (modReg1', nextInt1, ld2) = ldFirstStage modReg1  nextInt2  ld1
+            (modReg1'', nextInt2', ld3) = ldSecondStage  modReg2' nextInt1  ld2
+            (modReg2'', nextInt1', ld4) = ldSecondStage  modReg1' nextInt2' ld3
+            (_,_,(a31,a32),_,_) = getRegInfo modReg1''
+            (_,_,(b31,b32),_,_) = getRegInfo modReg2''
                                     
 
 
-fdSecondStage (Num ((a1,a2,a3,a4,a5),a)) n = (Num ((False, (n,1), (0,0), [(a,a)], False),a), n+1, [a])
+ldRoot (Num ((_,ldInfo,_,_,_),a)) n ld = (Num ((False, ldInfo, (n,1), (1,(a,a)),False),a), n-1, a:ld)
 
-fdSecondStage ModEmptyChar n = (ModEmptyChar, n, [])
+ldRoot ModEmptyChar n ld = (ModEmptyChar, n, ld)
+
+----------------------------------------------------------------------------------------------------------------------------------
+
+ldFirstStage :: ModRegExpr -> NextInt -> LastData -> (ModRegExpr, NextInt, LastData)
+
+ldFirstStage (ModKleene (_, modReg)) n ld = (ModKleene ((True, b2,b3,b4, b5), modReg'), nextInt, ld1)
+        where   (modReg', nextInt, ld1) = ldFirstStage modReg n ld
+                (_,b2,b3,b4,b5) = getRegInfo modReg'
+
+ldFirstStage (ModConcat ((containsE, ldInfo,_,posList,_), (modReg1, modReg2))) n ld
+    | getModContainsE modReg2 = let (modReg2', nextInt,  ld1) = ldFirstStage modReg2 n ld
+                                    (modReg1', nextInt', ld2) = ldFirstStage modReg1 nextInt ld1
+                                    (_,_,(b31,b32),_,_) = getRegInfo modReg1'
+                                    (_,_,( _ ,c32),_,_) = getRegInfo modReg2'  in
+                                    (ModConcat ((containsE, ldInfo, (b31, b32+c32),posList,False), (modReg1', modReg2')), nextInt', ld2)
+    
+    | otherwise = let   (modReg2', nextInt, ld1)  = ldFirstStage modReg2 n ld
+                        (_,_,b3,_,_) = getRegInfo modReg2' in
+                        (ModConcat ((containsE, ldInfo, b3, posList, False), (modReg1, modReg2')), nextInt, ld1)
+
+
+ldFirstStage (ModUnion ((containsE, ldInfo,_,posList,_), (modReg1, modReg2))) n ld = case modReg1 of
+    ModEmptyChar -> (ModUnion ((True, ldInfo,(c31,c32),posList,False), (modReg1',modReg2')), nextInt1, ld2)
+    _ ->   case modReg2 of
+        ModEmptyChar -> (ModUnion ((True, ldInfo, (b31,b32), posList,False), (modReg1', modReg2')), nextInt1, ld2)
+        _ -> (ModUnion ((containsE, ldInfo, (b31, b32+c32),  posList,False), (modReg1', modReg2')), nextInt1, ld2)
+    
+    where   (modReg2', nextInt2, ld1) = ldFirstStage modReg2 n ld
+            (modReg1', nextInt1, ld2) = ldFirstStage modReg1 nextInt2 ld1
+            (_,_,(b31,b32),_,_) = getRegInfo modReg1'
+            (_,_,(c31,c32),_,_) = getRegInfo modReg2'
+                                    
+
+  
+ldFirstStage (Num ((_,ldInfo,_,_,_),a)) n ld = (Num ((False, ldInfo, (n,1), (1,(a,a)), False),a), n-1, a:ld)
+
+ldFirstStage ModEmptyChar n ld = (ModEmptyChar, n, ld)
+
+----------------------------------------------------------------------------------------------------------------------------------
+
+ldSecondStage :: ModRegExpr -> NextInt -> LastData -> (ModRegExpr, NextInt, LastData)
+
+ldSecondStage (ModKleene (_, modReg)) n ld = (ModKleene ((True, a2,a3,a4, False), modReg'), nextInt, ld1)
+        where   (modReg', nextInt, ld1) = ldSecondStage modReg n ld
+                (_,a2,a3,a4,_) = getRegInfo modReg'
+
+ldSecondStage (ModConcat (regInfo, (modReg1, modReg2))) n ld = 
+                                let ldFunction = if getModContainsE modReg2 then ldSecondStage else ldRoot
+                                    (modReg2', nextInt2, ld1) = ldSecondStage modReg2 n ld
+                                    (modReg1', nextInt1, ld2) = ldFunction modReg1 nextInt2 ld1 in
+                                    (ModConcat (regInfo, (modReg1', modReg2')), nextInt1, ld2)
+
+ldSecondStage (ModUnion (regInfo, (modReg1, modReg2))) n ld = (ModUnion (regInfo, (modReg1',modReg2')), nextInt1, ld2)
+    
+    where   (modReg2', nextInt2, ld1) = ldSecondStage modReg2 n ld
+            (modReg1', nextInt1, ld2) = ldSecondStage modReg1 nextInt2 ld1
+
+ldSecondStage (Num a) n ld = (Num a, n, ld)
+
+ldSecondStage ModEmptyChar n ld = (ModEmptyChar, n, ld)
 
 
 ----------------------------------------------------------------------------------------------------------------------------------
@@ -333,10 +393,24 @@ fdSecondStage ModEmptyChar n = (ModEmptyChar, n, [])
 ----------------------------------- Step 5: Removing the linearization from the NFA ----------------------------------------------
 ----------------------------------------------------------------------------------------------------------------------------------
 
+----------------------------------- Some functions used for testing the code written ---------------------------------------------
 
-testing :: [Char] -> (LinearisationMap, NextInt, ModExpr)
+
+testing :: [Char] -> (LinearisationMap, NextInt, ModRegExpr)
 testing = simplifyRegexInitialisation . parseRegexpr
 
-testing1 :: [Char] -> (ModRegExpr, NextInt, TreesPositions)
-testing1 regex = fdRoot reg 1
-    where (l, _, reg) = testing regex
+getNumOfPositions :: ModRegExpr -> NumOfPositions
+getNumOfPositions ModEmptyChar = 0
+getNumOfPositions (Num _) = 1
+getNumOfPositions (ModKleene ((_, _,_,(num,_),_),_)) = num
+getNumOfPositions (ModUnion  ((_, _,_,(num,_),_),_)) = num
+getNumOfPositions (ModConcat ((_, _,_,(num,_),_),_)) = num
+
+
+
+testing1 :: [Char] -> (NextInt, NextInt, ModRegExpr, [(Position, NumOfPositions)], [(Position, NumOfPositions)])
+testing1 regex = (a1,a2, reg'', myZip fdlist [1..n], myZip ldlist [1..n])
+    where   (l, _, reg) = testing regex
+            n = getNumOfPositions reg
+            (reg',a1, fdlist) = fdRoot reg n [] 
+            (reg'',a2, ldlist) = ldRoot reg' n []
