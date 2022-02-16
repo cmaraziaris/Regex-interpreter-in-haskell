@@ -306,8 +306,8 @@ ldRoot (ModUnion ((containsE, ldInfo,_,posList,_), (modReg1, modReg2))) n ld = c
     
     where   (modReg2', nextInt2, ld1) = ldFirstStage modReg2 n ld
             (modReg1', nextInt1, ld2) = ldFirstStage modReg1  nextInt2  ld1
-            (modReg1'', nextInt2', ld3) = ldSecondStage  modReg2' nextInt1  ld2
-            (modReg2'', nextInt1', ld4) = ldSecondStage  modReg1' nextInt2' ld3
+            (modReg2'', nextInt2', ld3) = ldSecondStage  modReg2' nextInt1  ld2
+            (modReg1'', nextInt1', ld4) = ldSecondStage  modReg1' nextInt2' ld3
             (_,_,(a31,a32),_,_) = getRegInfo modReg1''
             (_,_,(b31,b32),_,_) = getRegInfo modReg2''
                                     
@@ -392,6 +392,9 @@ ldSecondStage ModEmptyChar n ld = (ModEmptyChar, n, ld)
 ----------------------------------------------------------------------------------------------------------------------------------
 ----------------------------------- Step 5: Removing the linearization from the NFA ----------------------------------------------
 ----------------------------------------------------------------------------------------------------------------------------------
+
+
+
 
 ----------------------------------- Some functions used for testing the code written ---------------------------------------------
 
