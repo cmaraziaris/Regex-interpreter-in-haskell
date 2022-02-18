@@ -17,9 +17,9 @@ module Utilities
     MyMaybe(..)
 ) where
 
-data MyMaybe a = MyNothing | MyJust a
+data MyMaybe a = MyNothing | MyJust a deriving (Eq,Show,Ord)
 
-data MyOrdering = MyLT | MyEQ | MyGT
+data MyOrdering = MyLT | MyEQ | MyGT deriving (Eq,Show,Ord)
 
 myCompare :: Ord a => a -> a -> MyOrdering
 myCompare x y
@@ -58,8 +58,7 @@ mySpan p (x:xs)
     | otherwise = ([], x:xs) 
 
 myConcat :: [[a]] -> [a]
-myConcat [] = []
-myConcat (l:ll) = l ++ myConcat ll
+myConcat = myFoldr (++) []
 
 myElem :: (Eq a) => a -> [a] -> Bool
 myElem _ [] = False

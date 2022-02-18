@@ -131,26 +131,7 @@ simplifyRegex _ _ = error "Invalid simplifyRegex argument" -- It's invalid to ge
 -- It is useful to know whether a node is a root node or not of a subtree so that it is known whether the recursion can be stopped
 -- in the construction of the firstdata array/list
 
-getRegInfo :: ModRegExpr -> RegInfo
-getRegInfo (Num (regInfo,_)) = regInfo
-getRegInfo (ModKleene (regInfo,_)) = regInfo
-getRegInfo (ModConcat (regInfo,_)) = regInfo
-getRegInfo (ModUnion  (regInfo,_)) = regInfo
-getRegInfo _ = error "False argument in getRegInfo: Given ModEmptyChar which has no RegInfo"
 
-getFdInfo :: ModRegExpr -> FirstDataInfo
-getFdInfo (Num ((_,fdInfo,_,_,_),_)) = fdInfo
-getFdInfo (ModKleene ((_,fdInfo,_,_,_),_)) = fdInfo
-getFdInfo (ModConcat ((_,fdInfo,_,_,_),_)) = fdInfo
-getFdInfo (ModUnion  ((_,fdInfo,_,_,_),_)) = fdInfo
-getFdInfo _ = error "False argument in getFdInfo: Given ModEmptyChar which has no FirstDataInfo"
-
-getLdInfo :: ModRegExpr -> LastDataInfo
-getLdInfo (Num ((_,_,ldInfo,_,_),_)) = ldInfo
-getLdInfo (ModKleene ((_,_,ldInfo,_,_),_)) = ldInfo
-getLdInfo (ModConcat ((_,_,ldInfo,_,_),_)) = ldInfo
-getLdInfo (ModUnion  ((_,_,ldInfo,_,_),_)) = ldInfo
-getLdInfo _ = error "False argument in getLdInfo: Given ModEmptyChar which has no LastDataInfo"
 
 
 type FirstData = [Position]
@@ -382,6 +363,52 @@ ldSecondStage ModEmptyChar n ld = (ModEmptyChar, n, ld)
 --------------------------------------------- Step 3: Calculating the CFS systen -------------------------------------------------
 ----------------------------------------------------------------------------------------------------------------------------------
 
+-- Recursively construct the CFS system
+
+
+type Index = Int --the position in the original list
+type IndexedFirstData = [(Position, Index)] -- the FirstData list but every element has its index corresponind to the original firstdata
+type IndexedLastData  = [(Position, Index)] -- same as IndexFirstData
+type CFS = PositionsList -- the positions the CFS contains
+type FollowList = PositionsList -- The positions which have a common follow set (CFS)
+type CFSSystem = [(Int, FollowList, CFS)]   -- The index of the CommonFollowSet, the positions which have in common the CFS as part of their
+                                            -- follow-set decomposition, and the CFS itself
+
+-- Functions used for getting specific information from a ModRegExpr
+getRegInfo :: ModRegExpr -> RegInfo
+getRegInfo (Num (regInfo,_)) = regInfo
+getRegInfo (ModKleene (regInfo,_)) = regInfo
+getRegInfo (ModConcat (regInfo,_)) = regInfo
+getRegInfo (ModUnion  (regInfo,_)) = regInfo
+getRegInfo _ = error "False argument in getRegInfo: Given ModEmptyChar which has no RegInfo"
+
+getFdInfo :: ModRegExpr -> FirstDataInfo
+getFdInfo (Num ((_,fdInfo,_,_,_),_)) = fdInfo
+getFdInfo (ModKleene ((_,fdInfo,_,_,_),_)) = fdInfo
+getFdInfo (ModConcat ((_,fdInfo,_,_,_),_)) = fdInfo
+getFdInfo (ModUnion  ((_,fdInfo,_,_,_),_)) = fdInfo
+getFdInfo _ = error "False argument in getFdInfo: Given ModEmptyChar which has no FirstDataInfo"
+
+getLdInfo :: ModRegExpr -> LastDataInfo
+getLdInfo (Num ((_,_,ldInfo,_,_),_)) = ldInfo
+getLdInfo (ModKleene ((_,_,ldInfo,_,_),_)) = ldInfo
+getLdInfo (ModConcat ((_,_,ldInfo,_,_),_)) = ldInfo
+getLdInfo (ModUnion  ((_,_,ldInfo,_,_),_)) = ldInfo
+getLdInfo _ = error "False argument in getLdInfo: Given ModEmptyChar which has no LastDataInfo"
+
+getNumOfPositions :: ModRegExpr -> NumOfPositions
+getNumOfPositions ModEmptyChar = 0
+getNumOfPositions (Num _) = 1
+getNumOfPositions (ModKleene ((_, _,_,(num,_),_),_)) = num
+getNumOfPositions (ModUnion  ((_, _,_,(num,_),_),_)) = num
+getNumOfPositions (ModConcat ((_, _,_,(num,_),_),_)) = num
+
+
+-- The function which constructs the CFS system for the subtree t given the appropriately fdata(t) and ldata(t)
+cfsConstruction :: ModRegExpr -> IndexedFirstData -> IndexedLastData -> CFSSystem -> NextInt -> (CFSSystem, NextInt)
+
+cfsConstruction subtree fdata ldata cfsSystem n = ([],0)
+    where   (containsE, (fdPos,fdNum),(ldPos,ldnum), (posNum, (pos1,pos2)), branchFlag) = getRegInfo subtree
 
 
 ----------------------------------------------------------------------------------------------------------------------------------
@@ -401,15 +428,6 @@ ldSecondStage ModEmptyChar n ld = (ModEmptyChar, n, ld)
 
 testing :: [Char] -> (LinearisationMap, NextInt, ModRegExpr)
 testing = simplifyRegexInitialisation . parseRegexpr
-
-getNumOfPositions :: ModRegExpr -> NumOfPositions
-getNumOfPositions ModEmptyChar = 0
-getNumOfPositions (Num _) = 1
-getNumOfPositions (ModKleene ((_, _,_,(num,_),_),_)) = num
-getNumOfPositions (ModUnion  ((_, _,_,(num,_),_),_)) = num
-getNumOfPositions (ModConcat ((_, _,_,(num,_),_),_)) = num
-
-
 
 testing1 :: [Char] -> (NextInt, NextInt, ModRegExpr, [(Position, NumOfPositions)], [(Position, NumOfPositions)])
 testing1 regex = (a1,a2, reg'', myZip fdlist [1..n], myZip ldlist [1..n])
