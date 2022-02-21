@@ -10,6 +10,7 @@ module Utilities
     myFst,
     mySnd,
     myZip,
+    mySeparate,
     mergeSortBy,
     mergeSort,
     removeDuplicates,
@@ -60,6 +61,19 @@ mySpan p (x:xs)
 myConcat :: [[a]] -> [a]
 myConcat = myFoldr (++) []
 
+myFilter :: (a -> Bool) -> [a] -> [a]
+myFilter _ [] = []
+myFilter p (x:xs)
+    | p x = x : myFilter p xs
+    | otherwise = myFilter p xs
+
+mySeparate :: (a -> Bool) -> [a] -> ([a], [a])
+mySeparate _ [] = ([],[])
+mySeparate p (x:xs) 
+    | p x = (x:l1, l2)
+    | otherwise = (l1, x:l2)
+    where (l1, l2) = mySeparate p xs
+
 myElem :: (Eq a) => a -> [a] -> Bool
 myElem _ [] = False
 myElem a (x:xs)
@@ -77,7 +91,7 @@ myZip [] _ = []
 myZip _ [] = []
 myZip (x:xs) (y:ys) = (x,y) : myZip xs ys
 
-removeDuplicatesInner :: (Eq a) => (a -> a -> Bool) -> [a] -> MyMaybe a -> [a]
+removeDuplicatesInner :: (a -> a -> Bool) -> [a] -> MyMaybe a -> [a]
 removeDuplicatesInner cmp_eq [] _ = [] 
 removeDuplicatesInner cmp_eq (x:xs) MyNothing =  x:removeDuplicatesInner cmp_eq xs (MyJust x)
 removeDuplicatesInner cmp_eq (x:xs) (MyJust last_elem)
@@ -85,8 +99,11 @@ removeDuplicatesInner cmp_eq (x:xs) (MyJust last_elem)
     | otherwise = x : cont
     where cont = removeDuplicatesInner cmp_eq xs (MyJust x)
 
-removeDuplicates :: (Eq a) => (a -> a -> Bool) -> [a] -> [a]
+removeDuplicates :: (a -> a -> Bool) -> [a] -> [a]
 removeDuplicates cmp_eq l = removeDuplicatesInner cmp_eq l MyNothing
+
+removeDuplicates' :: Eq a => [a] -> [a]
+removeDuplicates' = removeDuplicates (==) 
 
 -- MergeSort implementation
 

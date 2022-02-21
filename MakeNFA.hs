@@ -5,16 +5,17 @@
 --------------------------------------------------------------------------------------------------------------------------------------------------
 
 -- It is used for constructing much better NFAs from regexes without ε-transitions and with few states and O(n (log n)^2 ) transitions in general 
--- This is a massive improvement to Thompson's construction. There is a cost in time by a factor of log^2 (n) and a bigger hidden constant.
+-- This is an improvement to Thompson's construction . There is a cost in time by a factor of log^2 (n) and a bigger hidden constant.
 -- However, the resulting improved NFA is worth such a cost, especially if it about to later be converted into a DFA.
 
 -- It is worth mentioning that such a construction is at most a factor of log(n) worse from any construction of an NFA with the goal
--- of minimizing the transitions of an NFA, since the lower bound is Ω(n log(n)) for the number of transitions
+-- of minimizing the transitions of an NFA, since the lower bound is at least Ω(n log(n)) for the number of transitions
 
 import RegParser (parseRegexpr, RegExpr(EmptyChar, Kleene, Concat, Union, AnyLetter, Letter) )
 import Types
 import Utilities
 
+import DictSet
 
 -- makeNfa = snd. makeNfa' . snd. simplifyRegex. parseRegexpr 
 
@@ -369,8 +370,8 @@ ldSecondStage ModEmptyChar n ld = (ModEmptyChar, n, ld)
 type Index = Int --the position in the original list
 type IndexedFirstData = [(Position, Index)] -- the FirstData list but every element has its index corresponind to the original firstdata
 type IndexedLastData  = [(Position, Index)] -- same as IndexFirstData
-type CFS = PositionsList -- the positions the CFS contains
-type FollowList = PositionsList -- The positions which have a common follow set (CFS)
+type CFS = [Position] -- the positions the CFS contains
+type FollowList = [Position] -- The positions which have a common follow set (CFS)
 type CFSSystem = [(Int, FollowList, CFS)]   -- The index of the CommonFollowSet, the positions which have in common the CFS as part of their
                                             -- follow-set decomposition, and the CFS itself
 
@@ -398,17 +399,221 @@ getLdInfo _ = error "False argument in getLdInfo: Given ModEmptyChar which has n
 
 getNumOfPositions :: ModRegExpr -> NumOfPositions
 getNumOfPositions ModEmptyChar = 0
-getNumOfPositions (Num _) = 1
+getNumOfPositions (Num ((_, _,_,(num,_),_),_)) = num
 getNumOfPositions (ModKleene ((_, _,_,(num,_),_),_)) = num
 getNumOfPositions (ModUnion  ((_, _,_,(num,_),_),_)) = num
 getNumOfPositions (ModConcat ((_, _,_,(num,_),_),_)) = num
 
 
--- The function which constructs the CFS system for the subtree t given the appropriately fdata(t) and ldata(t)
-cfsConstruction :: ModRegExpr -> IndexedFirstData -> IndexedLastData -> CFSSystem -> NextInt -> (CFSSystem, NextInt)
+type FStarInfo = (FirstDataInfo, LastDataInfo)
+type IndexedInfo = (IndexedFirstData, IndexedLastData)
 
-cfsConstruction subtree fdata ldata cfsSystem n = ([],0)
-    where   (containsE, (fdPos,fdNum),(ldPos,ldnum), (posNum, (pos1,pos2)), branchFlag) = getRegInfo subtree
+
+-- A base case in case the initial regex is the emptychar
+
+-- Update FStarInfo if current subexpression has for root a KleeneStar node 
+updateFSInfo :: ModRegExpr -> MyMaybe FStarInfo -> MyMaybe FStarInfo
+updateFSInfo (ModKleene ((_,fdinfo,ldinfo,_,_),_)) _ = MyJust (fdinfo, ldinfo)
+updateFSInfo _ fsinfo = fsinfo
+
+{- 
+updateFirstLastInfo' :: IndexedInfo -> FirstDataInfo -> LastDataInfo -> (IndexedInfo,IndexedInfo)
+updateFirstLastInfo' (indexedFd, indexedLd) (fdPos, fdNum) (ldPos, ldNum) = ((fd1,ld1), (fd2,ld2))
+    where   p_fd (_,n) =  fdPos <= n && n <= fdPos + (fdNum -1)
+            p_ld (_,n) =  ldPos <= n && n <= ldPos + (ldNum -1)
+            (fd1, fd2) = mySeparate p_fd indexedFd
+            (ld1, ld2) = mySeparate p_ld indexedLd
+-}
+
+updateFirstLastInfo :: IndexedInfo -> (Position,Position) -> (IndexedInfo,IndexedInfo)
+updateFirstLastInfo (indexedFd, indexedLd) (pos1, pos2) = ((fd1,ld1), (fd2,ld2))
+    where   p (n,_) = n >= pos1 && n <= pos2
+            (fd1, fd2) = mySeparate p indexedFd
+            (ld1, ld2) = mySeparate p indexedLd
+
+setFlag :: ModRegExpr -> ModRegExpr
+setFlag ModEmptyChar = error "setFlag: Got ModEmptyChar"
+setFlag (Num ((a1,a2,a3,a4,_),a)) = Num ((a1,a2,a3,a4,True),a)
+setFlag (ModKleene ((a1, a2, a3, a4, _),a5)) = ModKleene ((a1, a2, a3,a4,True),a5)
+setFlag (ModUnion  ((a1, a2, a3, a4, _),a5)) = ModUnion  ((a1, a2, a3,a4,True),a5)
+setFlag (ModConcat ((a1, a2, a3, a4, _),a5)) = ModConcat ((a1, a2, a3,a4,True),a5)
+
+constructFollowSet :: [(Position,Index)] -> [FirstDataInfo] -> [Position]
+constructFollowSet [] _ = []
+constructFollowSet _ [] = []
+constructFollowSet l1@((pos,index):l1s) l2@((dataPos, dataNum):l2s)
+    | dataPos <= index && index <= dataPos + (dataNum -1) = pos : constructFollowSet l1s l2
+    | dataPos >  index = constructFollowSet l1s l2
+    | otherwise = constructFollowSet l1 l2s 
+
+constructCFS :: CFSSystem -> NextInt -> IndexedInfo -> MyMaybe FStarInfo -> (Bool,[FirstDataInfo],Int) -> (Bool,[LastDataInfo],Int) -> FirstList -> LastList -> (CFSSystem, NextInt)
+constructCFS cfs nextInt flInfo fsInfo (fBool,f,fnum) (lBool,l,lnum) fList lList
+    | null lList && null l' = (cfs, nextInt)
+    | null lList = ((nextInt, lFollowSet, fList):cfs, nextInt+1)
+    | null l' = ((nextInt, lList, fFollowSet):cfs, nextInt+1)
+    | otherwise = ((nextInt+1, myMap myFst l', fList):(nextInt, lList, myMap myFst f'):cfs, nextInt+2)
+    where   ((f',_), (l',_))
+                | fsInfo == MyNothing = ((f,1), (l,1))
+                | otherwise = let   MyJust (fsfInfo, fslInfo) = fsInfo in
+                                    rootlistUpdate (fBool,f,fnum) (MyJust fsfInfo) (lBool,l,lnum) (MyJust fslInfo)
+            (flf, fll) = flInfo
+            fFollowSet = constructFollowSet flf f'
+            lFollowSet = constructFollowSet fll l'
+            
+
+
+subtractPos :: ModRegExpr -> NumPosRem -> ModRegExpr
+subtractPos ModEmptyChar _ = ModEmptyChar
+subtractPos  (Num ((a1,a2,a3,(a41,a42),a5),a)) k = Num ((a1,a2,a3,(a41-k,a42),a5),a)
+subtractPos  (ModKleene ((a1,a2,a3,(a41,a42),a5),a)) k = ModKleene ((a1,a2,a3,(a41-k,a42),a5),a)
+subtractPos (ModUnion  ((a1,a2,a3,(a41,a42),a5),a)) k = ModUnion  ((a1,a2,a3,(a41-k,a42),a5),a)
+subtractPos  (ModConcat ((a1,a2,a3,(a41,a42),a5),a)) k = ModConcat ((a1,a2,a3,(a41-k,a42),a5),a)
+type FirstList = [Position] -- from subtree t1 with root F1, save first(F1) `intersection` pos(t1) 
+type LastList = [Position]  -- from subtree t1 with root F1, save last(F1)  `intersection` pos(t1)
+
+type CFSResult = (ModRegExpr, CFSSystem, NextInt, IndexedInfo, NumPosRem, (Bool,[FirstDataInfo],Int), (Bool,[LastDataInfo],Int), FirstList, LastList)
+
+-- The function which constructs the CFS system for the subtree t given the appropriately fdata(t) and ldata(t)
+-- This function however is called only right from the recursion step, thus a modification of some parameters have to be made
+-- Specifically, flinfo, fsInfo and
+cfsConstructionAfterRec :: ModRegExpr -> IndexedInfo -> CFSSystem -> NextInt -> MyMaybe FStarInfo -> CFSResult
+
+cfsConstructionAfterRec subtree flInfo cfsSystem n fsInfo
+    -- The case where the initial regex is the EmptyChar. In that case, nothing needs to be done
+    | numPos == 0 =  error "cfsConstructionAfterRec: Got numPos = 0"--(ModEmptyChar, [], 0, ([],[]), 0, (False,[],0), (False,[],0),[],[])
+
+    -- The base case is reached
+    | numPos == 1 =  let    (cfs, nextInt) = cfsConstructionBaseCase subtree n fsInfo' cfsSystem in
+                            (subtractPos (setFlag subtree) 1, cfs, nextInt, flInfo2, 1, (False,[],0), (False,[],0), myMap myFst fd, myMap myFst ld)
+
+    -- The recursion has to be used
+    | otherwise = let   (reg', cfs', nextInt, flInfo', k', (fBool,f,fnum), (lBool,l,lnum), fList, lList) = cfsConstructionRecCase subtree flInfo1 cfsSystem n fsInfo' numPos
+                        (cfs'', nextInt') = constructCFS cfs' nextInt flInfo' fsInfo' (fBool,f,fnum) (lBool,l,lnum) fList lList
+                        (a1, a2, a3, a4, k, a5, a6, a7, a8) = cfsConstructionAfterRec (subtractPos reg' k') flInfo' cfs'' nextInt' fsInfo' in
+                            (a1, a2, a3, flInfo2, k+k', a5, a6, a7, a8)
+
+    where   numPos = getNumOfPositions subtree
+            fdInfo = getFdInfo subtree
+            ldInfo = getLdInfo subtree
+            fsInfo' = updateFSInfo subtree fsInfo
+            (_,_,_,(_,posTuple),_) = getRegInfo subtree
+            (flInfo1, flInfo2) = updateFirstLastInfo flInfo posTuple
+            (fd,ld) = flInfo1
+
+            --(containsE, (fdPos,fdNum),(ldPos,ldnum), (posNum, (pos1,pos2)), branchFlag) = getRegInfo subtree
+
+-- |pos(t)| <= 3*|pos(t1)| <= 2*|pos(t)|
+
+
+type IsLeft = Bool  --checks if findPath chose the left regex
+type IsEnd  = Bool  --checks if the chosen regex/subtree (lets call it t1) of findPath satisfies the condition 1/3 |pos(t)| <= |pos(t1)| <= 2/3 |pos(t)| 
+                    -- In other words, if IsEnd is True, the search for the subtree t1 has ended, it has be found. Otherwise, the search needs to continue
+findPath :: NumOfPositions -> ModRegExpr -> ModRegExpr -> (IsLeft, IsEnd)
+findPath _ ModEmptyChar _ = (False, False)
+findPath _ _ ModEmptyChar = (True, False)
+findPath numPos reg1 reg2 
+    | flag1 = (False,False)
+    | flag2 = (True, False)
+    | otherwise = case (b11, b12) of
+        (True, True)   -> (pos1 > pos2,True)
+        (True, False)  -> (True, False)
+        (False, True)  -> (False, False)
+        (False, False) ->  error "findPath -> Wrong Result: It is an impossible result unless numPos < 0 which cannot happen"
+    where   (_,_,_,_,flag1) = getRegInfo reg1
+            (_,_,_,_,flag2) = getRegInfo reg2
+            pos1 = getNumOfPositions reg1
+            pos2 = getNumOfPositions reg2
+            b11 = 3*pos1 >= numPos
+            b12 = 3*pos1 <= 2*numPos
+
+
+-- Filter the rootlist
+filterRootList :: ([(Int, Int)], Int) -> (Int, Int) -> [(Int, Int)]
+filterRootList (l,0) tuple = l
+filterRootList ((dataPos,dataNum):l,n) tuple@(dataPos', dataNum') = if f then filteredL else (dataPos,dataNum):filteredL
+    where   filteredL = filterRootList (l,n-1) tuple 
+            f = dataPos' <= dataPos && dataPos' + dataNum' >= dataPos + dataNum -- (f/l)data is subset of (f/l)data' 
+
+filterRootList _ _ = error "filterRootList" -- a case which will never happem
+
+rootlistUpdate :: (Bool,[FirstDataInfo], Int) -> MyMaybe FirstDataInfo -> (Bool,[LastDataInfo],Int) -> MyMaybe LastDataInfo -> (([FirstDataInfo], Int), ([LastDataInfo],Int))
+
+rootlistUpdate (fbool,f,fnum) fdInfo (lbool,l,lnum) ldInfo = case (fdInfo,ldInfo) of
+        -- the Parent node is KleeneStar
+        (MyJust fdInfo', MyJust ldInfo') -> (if fbool then (f,fnum) else (fdInfo' : filterRootList (f, fnum) fdInfo',1), if lbool then (l,lnum) else (ldInfo' : filterRootList (l, lnum) ldInfo',1))
+        -- the parent node of G is of the form G x H
+        (MyJust fdInfo', MyNothing) -> (if fbool then (f,fnum) else (fdInfo' : f, fnum+1), (l,lnum))
+        -- the parent node of G is of the form H x G
+        (MyNothing, MyJust ldInfo') -> ((f,fnum), if lbool then (l,lnum) else (ldInfo' : l, lnum+1))
+        -- the parent node is a Union thus we ignore it
+        (MyNothing, MyNothing) -> ((f,fnum), (l,lnum)) 
+
+type NumPosRem = Int    -- The number |pos(t1)| of the subtree t1 which will be computed recursively and then removed
+                        -- This number is important since it is necessary that the number of positions of every node/subexpression has to
+                        -- be updated every time a new subtree t1 is created in the cfsConstruction
+
+
+
+-- The recursive step of the recursion 
+cfsConstructionRecCase :: ModRegExpr -> IndexedInfo -> CFSSystem -> NextInt -> MyMaybe FStarInfo -> NumOfPositions -> CFSResult
+
+cfsConstructionRecCase (ModKleene ((_,fdinfo, ldinfo,(posNum,posTuple),_),reg)) flinfo cfsSystem n fsinfo numPos 
+    = (ModKleene ((True, fdinfo, ldinfo, (posNum - k',posTuple),False),reg'), cfs', nextInt, fsinfo', k', (fbool,f',1),(lbool,l',1), fList, lList)
+    where   (reg', cfs', nextInt, fsinfo', k', (fbool, f,fnum), (lbool, l,lnum), fList, lList) = cfsConstructionRecCase reg flinfo cfsSystem n fsinfo numPos
+            ((f',1),(l',1)) = rootlistUpdate (fbool,f,fnum) (MyJust fdinfo) (lbool,l,lnum) (MyJust ldinfo)
+
+
+cfsConstructionRecCase (ModConcat ((containsE,fdInfo, ldInfo,(posNum,posTuple),flag),(reg1,reg2))) flinfo cfsSystem n fsinfo numPos 
+    = (ModConcat ((containsE, fdInfo, ldInfo, (posNum - k',posTuple),flag),(reg1', reg2')), cfs', nextInt, fsinfo', k', (fbool', f',fnum'),(lbool',l',lnum'), fList, lList)
+    where   (isLeft, isEnd) = findPath numPos reg1 reg2
+            reg = if isLeft then reg1 else reg2
+            (reg', cfs', nextInt, fsinfo', k', (fbool,f,fnum), (lbool, l,lnum), fList, lList) = if  isEnd then 
+                                                                                                    cfsConstructionAfterRec reg flinfo cfsSystem n fsinfo else 
+                                                                                                    cfsConstructionRecCase reg flinfo cfsSystem n fsinfo numPos
+            (reg1', reg2') = if isLeft then (reg', reg2) else (reg1, reg')
+            (fd',ld') = if isLeft then (MyJust fdInfo, MyNothing) else (MyNothing, MyJust ldInfo)
+            (fbool',lbool')
+                | isLeft =  if getModContainsE reg1 then (fbool, lbool) else (True, lbool)
+                | getModContainsE reg2 = (fbool, lbool)
+                | otherwise = (fbool, True)   
+            ((f',fnum'),(l',lnum')) = rootlistUpdate (fbool, f,fnum) fd' (lbool,l,lnum) ld'
+
+cfsConstructionRecCase (ModUnion ((containsE,fdInfo, ldInfo,(posNum,posTuple),flag),(reg1,reg2))) flinfo cfsSystem n fsinfo numPos 
+    = (ModConcat ((containsE, fdInfo, ldInfo, (posNum - k',posTuple),flag),(reg1', reg2')), cfs', nextInt, fsinfo', k', (fbool,f,fnum),(lbool,l,lnum), fList, lList)
+    where   (isLeft, isEnd) = findPath numPos reg1 reg2
+            reg = if isLeft then reg1 else reg2
+            (reg', cfs', nextInt, fsinfo', k', (fbool,f,fnum), (lbool,l,lnum), fList, lList) = if isEnd then 
+                                                                        cfsConstructionAfterRec reg flinfo cfsSystem n fsinfo else 
+                                                                        cfsConstructionRecCase reg flinfo cfsSystem n fsinfo numPos
+            (reg1', reg2') = if isLeft then (reg', reg2) else (reg1, reg')
+
+cfsConstructionRecCase (Num _) _ _ _ _ _ = error "cfsConstructionRecCase: Got Num a, which is not possible in the RecCase"
+
+cfsConstructionRecCase ModEmptyChar _ _ _ _ _ = error "cfsConstructionRecCase: Got ModEmptyChar"
+
+-- Base case for subtree cfs construction when |pos(t)| = 1.
+cfsConstructionBaseCase :: ModRegExpr -> NextInt -> MyMaybe FStarInfo -> CFSSystem -> (CFSSystem, NextInt)
+cfsConstructionBaseCase (Num ((_,(fdpos,fdnum), (ldpos,ldnum),_,_),a)) n fsinfo cfs
+    | fsinfo == MyNothing = ((n,[a],[]):cfs, n+1)
+    | otherwise = if f && l then ((n,[a],[a]):cfs, n+1) else ((n,[a],[]):cfs,n+1)
+
+    where   MyJust ((fsfpos,fsfnum),(fslpos,fslnum)) = fsinfo
+            f = fsfpos <= fdpos && fsfpos + fsfnum >= fdpos + fdnum -- first(Num a) subset of first(t)
+            l = fslpos <= ldpos && fslpos + fslnum >= ldpos + ldnum -- last(Num a) subset of last(t)
+
+cfsConstructionBaseCase (ModKleene ((_,fdinfo,ldinfo,_,_),reg)) n _ cfs = cfsConstructionBaseCase reg n (MyJust (fdinfo,ldinfo)) cfs
+
+cfsConstructionBaseCase (ModConcat (_,(reg1,reg2))) n fsinfo cfs
+    |   flag    = cfsConstructionBaseCase reg2 n fsinfo cfs 
+    | otherwise = cfsConstructionBaseCase reg1 n fsinfo cfs
+    where (_,_,_,_,flag) = getRegInfo reg1
+
+cfsConstructionBaseCase (ModUnion (_,(reg1,reg2))) n fsinfo cfs = case reg1 of
+    ModEmptyChar -> cfsConstructionBaseCase reg2 n fsinfo cfs
+    _ -> cfsConstructionBaseCase (if flag then reg2 else reg1) n fsinfo cfs 
+    where   (_,_,_,_,flag) = getRegInfo reg1
+
+cfsConstructionBaseCase ModEmptyChar _ _ _ = error "cfsConstructionBaseCase : Got ModEmptyChar"
 
 
 ----------------------------------------------------------------------------------------------------------------------------------
@@ -429,9 +634,21 @@ cfsConstruction subtree fdata ldata cfsSystem n = ([],0)
 testing :: [Char] -> (LinearisationMap, NextInt, ModRegExpr)
 testing = simplifyRegexInitialisation . parseRegexpr
 
-testing1 :: [Char] -> (NextInt, NextInt, ModRegExpr, [(Position, NumOfPositions)], [(Position, NumOfPositions)])
+testing1 :: [Char] -> (NextInt, NextInt, ModRegExpr, IndexedFirstData, IndexedLastData)
 testing1 regex = (a1,a2, reg'', myZip fdlist [1..n], myZip ldlist [1..n])
     where   (l, _, reg) = testing regex
             n = getNumOfPositions reg
             (reg',a1, fdlist) = fdRoot reg n [] 
             (reg'',a2, ldlist) = ldRoot reg' n []
+
+{- 
+type CFSResult = (ModRegExpr, CFSSystem, NextInt, IndexedInfo, NumPosRem, (Bool,[FirstDataInfo],Int), (Bool,[LastDataInfo],Int), FirstList, LastList)
+
+cfsConstructionAfterRec :: ModRegExpr -> IndexedInfo -> CFSSystem -> NextInt -> MyMaybe FStarInfo -> CFSResult
+-}
+
+
+testing2 :: [Char] -> (NextInt, CFSSystem, ModRegExpr, IndexedInfo, NumPosRem)
+testing2 regex = (nextInt, cfs, reg', flinfo, k)
+    where   (a1,a2, reg, indexedFd, indexedLd) = testing1 regex
+            (reg', cfs, nextInt, flinfo, k, _, _, _, _) = cfsConstructionAfterRec reg (indexedFd, indexedLd) [] 1 MyNothing
