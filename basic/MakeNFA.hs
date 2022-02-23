@@ -3,7 +3,7 @@ module MakeNFA (makeNfa) where
 
 import Types
 import RegParser (parseRegexpr, RegExpr(..))
-import Utilities (mergeSort, removeDuplicates)
+import Utilities (removeDuplicates)
 
 type AvailableState = StateId
 
@@ -52,5 +52,5 @@ makeNfa str = (states, inputs, transitions, firstState, lastStates)
     where 
       ((_, _, transitions, firstState, lastStates), nextAvailState) = createNfaRec 1 (parseRegexpr str)
       states = [1..nextAvailState-1]
-      inputs = removeDuplicates (==) . mergeSort . filter isValidInput $ str
+      inputs = removeDuplicates . filter isValidInput $ str
       isValidInput c = not ( c == '_' || c == '|' || c == '(' || c == ')' || c == '*' || c == ' ' )

@@ -48,3 +48,21 @@ isMember x (y:xs) = (x == y) || isMember x xs
 evalUntil :: (t -> Bool) -> [t] -> Bool
 evalUntil f [] = False
 evalUntil f (x:xs) = f x || evalUntil f xs
+
+
+-- Tests // TODO : RM before sending
+
+inputs_full = [("ab|c","ab"), ("ab|.","abd"), ("(ab|.)*","abd")]
+outputs_full = [True, False, True]
+
+inputs_part = [("(ab)*", "abababde"), ("(ac|dd)*", "acacddeff")]
+outputs_part = [["", "ab","abab","ababab"], ["","ac","acac","acacdd"]]
+
+test_full :: Bool
+test_full = (map regexFullMatch inputs_full) == outputs_full
+
+test_part :: Bool
+test_part = (map regexPartMatch inputs_part) == outputs_part
+
+test_all :: Bool
+test_all = test_full && test_part

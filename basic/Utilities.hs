@@ -74,16 +74,16 @@ mySnd :: (a, b) -> b
 mySnd (_,b) = b
 
 
-removeDuplicatesInner :: (Eq a) => (a -> a -> Bool) -> [a] -> MyMaybe a -> [a]
-removeDuplicatesInner cmp_eq [] _ = [] 
-removeDuplicatesInner cmp_eq (x:xs) MyNothing =  x:removeDuplicatesInner cmp_eq xs (MyJust x)
-removeDuplicatesInner cmp_eq (x:xs) (MyJust last_elem)
-    | cmp_eq x last_elem = cont
+removeDuplicatesInner :: Ord a => [a] -> MyMaybe a -> [a]
+removeDuplicatesInner [] _ = [] 
+removeDuplicatesInner (x:xs) MyNothing =  x:removeDuplicatesInner xs (MyJust x)
+removeDuplicatesInner (x:xs) (MyJust last_elem)
+    | x == last_elem = cont
     | otherwise = x : cont
-    where cont = removeDuplicatesInner cmp_eq xs (MyJust x)
+    where cont = removeDuplicatesInner xs (MyJust x)
 
-removeDuplicates :: (Eq a) => (a -> a -> Bool) -> [a] -> [a]
-removeDuplicates cmp_eq l = removeDuplicatesInner cmp_eq l MyNothing
+removeDuplicates :: Ord a => [a] -> [a]
+removeDuplicates l = removeDuplicatesInner (mergeSort l) MyNothing
 
 -- MergeSort implementation
 

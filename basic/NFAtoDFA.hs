@@ -4,72 +4,103 @@ module NFAtoDFA (nfaToDfa) where
 import Types
 import RegParser (parseRegexpr, RegExpr(..))
 
--- import MakeNFA -- TODO : rm 
--- import Debug.Trace
-
--- type Fsa = (States, Inputs, Transitions, FirstState, LastStates)
--- type Transition = (StateId, StateId, TransChar)
-
 type SetTransition = (States, States, TransChar)
 
 nfaToDfa :: Fsa -> Fsa
 nfaToDfa (states', inputs', transitions', firstState', [lastState']) = (states, inputs', transitions, firstState, finalStates)
-        where initState = get_epsilon_closure transitions' [firstState'] [firstState']
-              unmarked = [initState]
-              setStates = [initState]
-              (finalSetStates, trans) = convert transitions' inputs' unmarked setStates []
-              l = length(finalSetStates)
-              states = [l,l-1..1]
-              mapping = myZip finalSetStates states
-              transitions = convert_setTrans_toIntTrans mapping trans finalSetStates
-              finalStates = get_final mapping lastState'
-              firstState = get_mapping mapping initState
+  where 
+    initSetState = getEpsilonClosure transitions' [firstState']
+    (setStates, setTrans) = convertToSetDFA transitions' inputs' initSetState
+    (states, transitions, firstState, finalStates) = translateSetsToInts lastState' setStates setTrans initSetState
 
-check_symbol :: TransChar -> Transitions -> States -> SetTransition
-check_symbol symbol transitions tState = (tState, uState, symbol)
-              where move = get_states_move_letter transitions symbol tState
-                    uState = get_epsilon_closure transitions move move
+------------------------------------------------------------------------------------------------------
+-- Steps 5,6
 
-check_tState :: States -> Transitions -> Inputs -> [States] -> [States] -> ([SetTransition], [States], [States])
-check_tState tState transitions inputs unmarked setStates = (newTrans, newUnmarked, newSetStates)
-  where newTrans = filter (\(x,y,z) -> y /= [] && x /= []) [ check_symbol symbol transitions tState | symbol <- inputs ]
-        newUs = map (\(x,y,z) -> y) newTrans
-        newUnique = filter (\x -> member_list x setStates == False)  newUs
-        newUnmarked = newUnique ++ unmarked
-        newSetStates = newUnique ++ setStates
+translateSetsToInts :: StateId -> [States] -> [SetTransition] -> States -> (States, Transitions, FirstState, LastStates)
+translateSetsToInts lastNFAState setStates setTransitions initSetState = (intStates, intTransitions, intInitState, intFinalStates)
+  where
+    totalSetStates = length setStates
+    intStates = [1..totalSetStates]
+    mapping = myZip setStates intStates
+    convertSetTransToInt (srcSet, destSet, char) = ( getSetToIntMapping mapping srcSet, getSetToIntMapping mapping destSet, char )
+    intTransitions = map convertSetTransToInt setTransitions
+    intInitState = getSetToIntMapping mapping initSetState
+    intFinalStates = getFinalIntStates mapping lastNFAState
 
 
-convert :: Transitions -> Inputs -> [States] -> [States] -> [SetTransition] -> ([States],[SetTransition])
-convert _ _ [] finalSetStates transSoFar = (finalSetStates, transSoFar)
-convert transitions inputs (tState:ts) setStates transSoFar = convert transitions inputs newUnmarked newSetStates finalTrans
-  where (newTrans, newUnmarked, newSetStates) = check_tState tState transitions inputs ts setStates
-        finalTrans = newTrans ++ transSoFar
+getSetToIntMapping :: [(States, StateId)] -> States -> StateId
+getSetToIntMapping ((set,int):restMappings) setToMap = if set == setToMap then int else getSetToIntMapping restMappings setToMap
+-- getSetToIntMapping [] setToMap = 0
 
 
-get_mapping :: [(States, StateId)] -> States -> StateId
-get_mapping [] x = 0
-get_mapping ((set,int):ms) x = if set == x then int else get_mapping ms x
+getFinalIntStates :: [(States, StateId)] -> StateId -> [StateId]
+getFinalIntStates [] _ = []
+getFinalIntStates ((set,int):restMapping) finalNFAState 
+    | isMember finalNFAState set = int : checkRest
+    | otherwise = checkRest
+    where
+      checkRest = getFinalIntStates restMapping finalNFAState
 
-convert_setTrans_toIntTrans :: [(States, StateId)] -> [SetTransition] -> [States] -> Transitions
-convert_setTrans_toIntTrans mapping setTrans setStates = map (\(x,y,z) -> ( (get_mapping mapping x), (get_mapping mapping y), z) ) setTrans
+------------------------------------------------------------------------------------------------------
+-- Step 4
 
-get_final :: [(States, StateId)] -> StateId -> [StateId]
-get_final [] _ = []
-get_final ((set,int):mp) finalState = if member_list finalState set then int : (get_final mp finalState) else get_final mp finalState
+convertToSetDFA :: Transitions -> Inputs -> States -> ([States],[SetTransition])
+convertToSetDFA transitions inputs initState = convertToSetDFAInner transitions inputs [initState] [initState] []
+
+-- Perform a DFS search until no new set transitions are left to be visited. Return the final Set States and Set Transitions of the DFA.
+convertToSetDFAInner :: Transitions -> Inputs -> [States] -> [States] -> [SetTransition] -> ([States],[SetTransition])
+convertToSetDFAInner _ _ [] finalSetStates finalTrans = (finalSetStates, finalTrans)
+convertToSetDFAInner transitions inputs (stateToExpand:restToVisit) setStatesSoFar transSoFar = convertToSetDFAInner transitions inputs newToVisit newSetStates newTrans
+  where 
+    (newTransAdded, newReachableStates) = expandState stateToExpand transitions inputs setStatesSoFar
+    newToVisit = newReachableStates ++ restToVisit
+    newSetStates = newReachableStates ++ setStatesSoFar
+    newTrans = newTransAdded ++ transSoFar
+
+------------------------------------------------------------------------------------------------------
+-- Step 3: From a set-state S, given input character a, get the new reachable set-state S'
+
+-- For a given state, for every symbol find the new reachable states. Finally, accumulate and return all of these transitions and new states found.
+expandState :: States -> Transitions -> Inputs -> [States] -> ([SetTransition], [States])
+expandState stateToExpand transitions inputs setStates = (newTrans, newReachableStates)
+  where 
+    newTrans = filter (\(x,y,z) -> y /= [] && x /= []) [ getSetTransitionsReachedWithCharEps symbol transitions stateToExpand | symbol <- inputs ]
+    newReachableStates = filter (\x -> not $ isMember x setStates) . map (\(x,y,z) -> y) $ newTrans
+
+-- Given a set of states `states` and transition character `char`, find all the states that can be reached from the set by consuming `char`
+-- and a number of epsilon transitions.
+getSetTransitionsReachedWithCharEps :: TransChar -> Transitions -> States -> SetTransition
+getSetTransitionsReachedWithCharEps symbol transitions initStates = (initStates, reachedWithCharAndEps, symbol)
+              where reachedWithChar = getStatesReachedWithChar transitions symbol initStates
+                    reachedWithCharAndEps = getEpsilonClosure transitions reachedWithChar
+
+-- Given a set of states `states` and transition character `char`, find all the states that can be reached from the set by consuming `char`.
+getStatesReachedWithChar :: Transitions -> TransChar -> States -> States
+getStatesReachedWithChar transitions char states =  map (\(x,y,z) -> y) . filter (\(x,y,z) -> z == char && isMember x states) $ transitions
 
 
-member_list x [] = False
-member_list x (y:xs) = if x == y then True else member_list x xs
+------------------------------------------------------------------------------------------------------
+-- Step 2: Get ε-closure of a given list of states
 
-get_epsilon_closure :: Transitions -> States -> States -> States
-get_epsilon_closure transitions [] closure = closure
-get_epsilon_closure transitions (t:ts) closureSoFar = get_epsilon_closure transitions (found ++ ts) (found ++ closureSoFar) 
-                where us = map (\(x,y,z) -> y) (filter (\(x,y,z) -> x == t && z == '_') transitions)
-                      found = [ u | u <- us, (member_list u closureSoFar) == False ]
+getEpsilonClosure :: Transitions -> States -> States
+getEpsilonClosure trans initStates = getEpsilonClosureInner trans initStates []
 
-get_states_move_letter :: Transitions -> TransChar -> States -> States
-get_states_move_letter transitions c states =  map (\(x,y,z) -> y) (filter (\(x,y,z) -> z == c && member_list x states) transitions)
+-- If a state is already in the closure, don't explore it.
+-- Otherwise, add it in the so-far closure and also add its reachable states in the states-to-check list.
+getEpsilonClosureInner :: Transitions -> States -> States -> States
+getEpsilonClosureInner _ [] closure = closure
+getEpsilonClosureInner transitions (t:ts) closureSoFar
+    | isMember t closureSoFar = getEpsilonClosureInner transitions ts closureSoFar
+    | otherwise = getEpsilonClosureInner transitions (epsNeighbors ++ ts) (t:closureSoFar)
+    where
+      epsNeighbors = map (\(x,y,z) -> y) . filter (\(x,y,z) -> x == t && z == '_') $ transitions
+------------------------------------------------------------------------------------------------------
 
+-- Auxiliary
+isMember :: Eq t => t -> [t] -> Bool
+isMember x [] = False
+isMember x (y:xs) = (x == y) || isMember x xs
 
+myZip :: [a] -> [b] -> [(a,b)] 
 myZip [] [] = []
 myZip (x:xs) (y:ys) = (x,y) : (myZip xs ys)
