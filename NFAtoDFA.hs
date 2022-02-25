@@ -1,26 +1,23 @@
 
-module NFAtoDFA (nfaToDfa, makeDfa) where
+module NFAtoDFA (nfaToDfa) where
 
 import Types
 import RegParser (parseRegexpr, RegExpr(..))
-import Utilities
-import MakeNFA (makeNfa)
-
 
 type SetTransition = (States, States, TransChar)
 
 nfaToDfa :: Fsa -> Fsa
-nfaToDfa (states', inputs', transitions', firstState', lastStates) = (states, inputs', transitions, firstState, finalStates)
+nfaToDfa (states', inputs', transitions', firstState', [lastState']) = (states, inputs', transitions, firstState, finalStates)
   where 
-    initSetState = [firstState'] -- the nfa constructed from makeNfa with the used from the algorithm from the paper does not have ε-transitions
+    initSetState = getEpsilonClosure transitions' [firstState']
     (setStates, setTrans) = convertToSetDFA transitions' inputs' initSetState
-    (states, transitions, firstState, finalStates) = translateSetsToInts lastStates setStates setTrans initSetState
+    (states, transitions, firstState, finalStates) = translateSetsToInts lastState' setStates setTrans initSetState
 
 ------------------------------------------------------------------------------------------------------
 -- Steps 5,6
 
-translateSetsToInts :: States -> [States] -> [SetTransition] -> States -> (States, Transitions, FirstState, LastStates)
-translateSetsToInts finalNFAStates setStates setTransitions initSetState = (intStates, intTransitions, intInitState, intFinalStates)
+translateSetsToInts :: StateId -> [States] -> [SetTransition] -> States -> (States, Transitions, FirstState, LastStates)
+translateSetsToInts lastNFAState setStates setTransitions initSetState = (intStates, intTransitions, intInitState, intFinalStates)
   where
     totalSetStates = length setStates
     intStates = [1..totalSetStates]
@@ -28,21 +25,21 @@ translateSetsToInts finalNFAStates setStates setTransitions initSetState = (intS
     convertSetTransToInt (srcSet, destSet, char) = ( getSetToIntMapping mapping srcSet, getSetToIntMapping mapping destSet, char )
     intTransitions = map convertSetTransToInt setTransitions
     intInitState = getSetToIntMapping mapping initSetState
-    intFinalStates = getFinalIntStates mapping finalNFAStates
+    intFinalStates = getFinalIntStates mapping lastNFAState
 
 
 getSetToIntMapping :: [(States, StateId)] -> States -> StateId
 getSetToIntMapping ((set,int):restMappings) setToMap = if set == setToMap then int else getSetToIntMapping restMappings setToMap
-getSetToIntMapping [] setToMap = error "getSetToIntMapping : Got [] as first argument"
+-- getSetToIntMapping [] setToMap = 0
 
 
-getFinalIntStates :: [(States, StateId)] -> States -> [StateId]
+getFinalIntStates :: [(States, StateId)] -> StateId -> [StateId]
 getFinalIntStates [] _ = []
-getFinalIntStates ((set,int):restMapping) finalNFAStates 
-    | myAny  (`myMember` finalNFAStates) set= int : checkRest
+getFinalIntStates ((set,int):restMapping) finalNFAState 
+    | isMember finalNFAState set = int : checkRest
     | otherwise = checkRest
     where
-      checkRest = getFinalIntStates restMapping finalNFAStates
+      checkRest = getFinalIntStates restMapping finalNFAState
 
 ------------------------------------------------------------------------------------------------------
 -- Step 4
@@ -68,19 +65,42 @@ expandState :: States -> Transitions -> Inputs -> [States] -> ([SetTransition], 
 expandState stateToExpand transitions inputs setStates = (newTrans, newReachableStates)
   where 
     newTrans = filter (\(x,y,z) -> y /= [] && x /= []) [ getSetTransitionsReachedWithCharEps symbol transitions stateToExpand | symbol <- inputs ]
-    newReachableStates = filter (\x -> not $ myMember x setStates) . map (\(x,y,z) -> y) $ newTrans
+    newReachableStates = filter (\x -> not $ isMember x setStates) . map (\(x,y,z) -> y) $ newTrans
 
 -- Given a set of states `states` and transition character `char`, find all the states that can be reached from the set by consuming `char`
 -- and a number of epsilon transitions.
 getSetTransitionsReachedWithCharEps :: TransChar -> Transitions -> States -> SetTransition
-getSetTransitionsReachedWithCharEps symbol transitions initStates = (initStates, reachedWithChar, symbol)
+getSetTransitionsReachedWithCharEps symbol transitions initStates = (initStates, reachedWithCharAndEps, symbol)
               where reachedWithChar = getStatesReachedWithChar transitions symbol initStates
+                    reachedWithCharAndEps = getEpsilonClosure transitions reachedWithChar
 
 -- Given a set of states `states` and transition character `char`, find all the states that can be reached from the set by consuming `char`.
 getStatesReachedWithChar :: Transitions -> TransChar -> States -> States
-getStatesReachedWithChar transitions char states =  map (\(x,y,z) -> y) . filter (\(x,y,z) -> z == char && myMember x states) $ transitions
-
-makeDfa :: [Char] -> Fsa
-makeDfa = nfaToDfa . makeNfa
+getStatesReachedWithChar transitions char states =  map (\(x,y,z) -> y) . filter (\(x,y,z) -> z == char && isMember x states) $ transitions
 
 
+------------------------------------------------------------------------------------------------------
+-- Step 2: Get ε-closure of a given list of states
+
+getEpsilonClosure :: Transitions -> States -> States
+getEpsilonClosure trans initStates = getEpsilonClosureInner trans initStates []
+
+-- If a state is already in the closure, don't explore it.
+-- Otherwise, add it in the so-far closure and also add its reachable states in the states-to-check list.
+getEpsilonClosureInner :: Transitions -> States -> States -> States
+getEpsilonClosureInner _ [] closure = closure
+getEpsilonClosureInner transitions (t:ts) closureSoFar
+    | isMember t closureSoFar = getEpsilonClosureInner transitions ts closureSoFar
+    | otherwise = getEpsilonClosureInner transitions (epsNeighbors ++ ts) (t:closureSoFar)
+    where
+      epsNeighbors = map (\(x,y,z) -> y) . filter (\(x,y,z) -> x == t && z == '_') $ transitions
+------------------------------------------------------------------------------------------------------
+
+-- Auxiliary
+isMember :: Eq t => t -> [t] -> Bool
+isMember x [] = False
+isMember x (y:xs) = (x == y) || isMember x xs
+
+myZip :: [a] -> [b] -> [(a,b)] 
+myZip [] [] = []
+myZip (x:xs) (y:ys) = (x,y) : (myZip xs ys)
