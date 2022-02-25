@@ -4,6 +4,7 @@ module Utilities
     myFoldr,
     myDropWhile,
     myTakeWhile,
+    myReverse,
     mySpan,
     myConcat,
     myElem,
@@ -11,6 +12,7 @@ module Utilities
     mySnd,
     myZip,
     mySeparate,
+    myFilter,
     mergeSortBy,
     mergeSort,
     removeDuplicates,
@@ -51,6 +53,9 @@ myTakeWhile _ [] = []
 myTakeWhile p (x:xs)
     | p x = x : myTakeWhile p xs
     | otherwise = []
+
+myReverse :: [a] -> [a]
+myReverse = myFoldl (flip (:)) []
 
 mySpan :: (a -> Bool) -> [a] -> ([a], [a])
 mySpan _ [] = ([], [])
