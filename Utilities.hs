@@ -1,5 +1,6 @@
 module Utilities
 (   myMap,
+    myMember,
     myFoldl,
     myFoldr,
     myDrop,
@@ -13,6 +14,7 @@ module Utilities
     myFst,
     mySnd,
     myZip,
+    myAny,
     mySeparate,
     myFilter,
     mergeSortBy,
@@ -36,6 +38,13 @@ myCompare x y
 myMap :: (a -> b) -> [a] -> [b]
 myMap _ [] = []
 myMap f (x:xs) = f x : myMap f xs
+
+myMember :: Eq a => a -> [a] -> Bool
+myMember x = not . null . myDropWhile (x==)
+
+myAny :: (a -> Bool) -> [a] -> Bool
+myAny _ [] = False
+myAny f (x:xs) = f x ||  myAny f xs
 
 myFoldl :: (b -> a -> b) -> b -> [a] -> b
 myFoldl _ acc [] = acc

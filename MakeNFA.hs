@@ -1,14 +1,15 @@
 module MakeNFA (
+makeNfa
 --testing,
 --testing1,
 --testing2,
-ModRegExpr(..),
-LinearisationMap,
-NextInt,
-CFSSystem, 
-IndexedFirstData, 
-IndexedLastData, 
-NumPosRem
+--ModRegExpr(..),
+--LinearisationMap,
+--NextInt,
+--CFSSystem, 
+--IndexedFirstData, 
+--IndexedLastData, 
+--NumPosRem
 ) where
 
 --------------------------------------------------------------------------------------------------------------------------------------------------
@@ -564,9 +565,9 @@ makeLinearNFATransitions reg = (nextInt, transitions)
             lastSet = findLast (getLdInfo reg'') ldlist
             transitions = constructTransitions cfs firstList lastSet nextInt n
 
-makeNFA :: [Char] -> Fsa
-makeNFA str
-    | reg == ModEmptyChar = ([1], [], [], 1, [])
+makeNfa :: [Char] -> Fsa
+makeNfa str
+    | reg == ModEmptyChar = ([1], [], [], 1, [1])
     | otherwise = ([1..numberOfStates], inputs, transitions', 1, [ 1 |getModContainsE reg] ++ [numberOfStates]) 
     where   (linearMap, _, reg) = simplifyRegexInitialisation . parseRegexpr  $ str
             (numberOfStates, transitions) = makeLinearNFATransitions reg
@@ -588,12 +589,6 @@ testing1 regex = (a1,a2, reg'', myZip fdlist [1..n], myZip ldlist [1..n])
             
             (reg',a1, fdlist) = fdRoot reg n [] 
             (reg'',a2, ldlist) = ldRoot reg' n []  
-
-{- 
-type CFSResult = (ModRegExpr, CFSSystem, NextInt, IndexedInfo, NumPosRem, (Bool,[FirstDataInfo],Int), (Bool,[LastDataInfo],Int), FirstList, LastList)
-
-cfsConstructionAfterRec :: ModRegExpr -> IndexedInfo -> CFSSystem -> NextInt -> MyMaybe FStarInfo -> CFSResult
--}
 
 
 testing2 :: [Char] -> CFSSystem
