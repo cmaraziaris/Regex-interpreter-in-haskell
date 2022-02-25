@@ -1,7 +1,7 @@
 module MakeNFA (
-testing,
-testing1,
-testing2,
+--testing,
+--testing1,
+--testing2,
 ModRegExpr(..),
 LinearisationMap,
 NextInt,
@@ -127,23 +127,25 @@ type LastData = [Position]
 fdRoot :: ModRegExpr -> NextInt -> FirstData -> (ModRegExpr, NextInt, FirstData)
 
 fdRoot (ModKleene (_, modReg)) n fd = (ModKleene ((True,a2,a3,a4,False), modReg''), nextInt', fd2) 
-    where   (modReg', nextInt, fd1) = fdFirstStage modReg n fd
-            (modReg'', nextInt', fd2) = fdSecondStage modReg' nextInt fd1
+    where   (modReg', nextInt, fd1) = fdSecondStage modReg n fd
+            (modReg'', nextInt', fd2) = fdFirstStage modReg' nextInt fd1
             (_,a2,a3,a4,_) = getRegInfo modReg''
 
 fdRoot (ModConcat ((containsE, _,_,posList,_), (modReg1, modReg2))) n fd
-    | getModContainsE modReg1 = let (modReg2', nextInt2, fd1) = fdFirstStage modReg2 n fd
-                                    (modReg1', nextInt1, fd2) = fdFirstStage modReg1 nextInt2 fd1
-                                    (modReg1'', nextInt1', fd3) = fdSecondStage modReg1' nextInt1  fd2
-                                    (modReg2'', nextInt2', fd4) = fdSecondStage modReg2' nextInt1' fd3
+    | getModContainsE modReg1 = let (modReg1', nextInt1, fd1) = fdSecondStage modReg1 n fd
+                                    (modReg2', nextInt2, fd2) = fdSecondStage modReg2 nextInt1 fd1
+                                    (modReg1'', nextInt1', fd3) = fdFirstStage modReg1' nextInt2 fd2
+                                    (modReg2'', nextInt2', fd4) = fdFirstStage modReg2' nextInt1' fd3
                                     
-                                    (_,(a21,a22),a3,_,_) = getRegInfo modReg1''
-                                    (_,(_,b22),b3,_,_) = getRegInfo modReg2''  in
-                                    (ModConcat ((containsE, (a21, a22+b22),a3,posList,False), (modReg1'', modReg2'')), nextInt2', fd4)
+                                    
+                                    (_,(_,a22),a3,_,_) = getRegInfo modReg1''
+                                    (_,(b21,b22),b3,_,_) = getRegInfo modReg2''  in
+                                    (ModConcat ((containsE, (b21, a22+b22),a3,posList,False), (modReg1'', modReg2'')), nextInt2', fd4)
     
-    | otherwise = let   (modReg1', nextInt, fd1)  = fdFirstStage modReg1 n fd 
-                        (modReg1'', nextInt', fd2) = fdSecondStage modReg1' nextInt fd1
-                        (modReg2', nextInt'', fd3) = fdRoot modReg2 nextInt' fd2
+    | otherwise = let   (modReg1', nextInt, fd1) = fdSecondStage modReg1 n fd
+                        (modReg2', nextInt', fd2) = fdRoot modReg2 nextInt fd1
+                        (modReg1'', nextInt'', fd3)  = fdFirstStage modReg1' nextInt' fd2
+                        
                         (_,a2,a3,_,_) = getRegInfo modReg1'' in
                         (ModConcat ((containsE, a2, a3, posList, False), (modReg1'', modReg2')), nextInt'', fd3)
 
@@ -152,12 +154,13 @@ fdRoot (ModUnion ((containsE, _,_,posList,_), (modReg1, modReg2))) n fd = case m
     ModEmptyChar -> (ModUnion ((True, (b21,b22),b3,posList,False), (modReg1'',modReg2'')), nextInt2', fd4)
     _ ->   case modReg2 of
         ModEmptyChar -> (ModUnion ((True, (a21,a22),a3,posList,False), (modReg1'', modReg2'')), nextInt2', fd4)
-        _ -> (ModUnion ((containsE, (a21, a22+b22),a3, posList,False), (modReg1'', modReg2'')), nextInt2', fd4)
+        _ -> (ModUnion ((containsE, (b21, a22+b22),a3, posList,False), (modReg1'', modReg2'')), nextInt2', fd4)
     
-    where   (modReg2', nextInt2, fd1) = fdFirstStage modReg2 n fd
-            (modReg1', nextInt1, fd2) = fdFirstStage modReg1  nextInt2  fd1
-            (modReg1'', nextInt1', fd3) = fdSecondStage  modReg1' nextInt1  fd2
-            (modReg2'', nextInt2', fd4) = fdSecondStage  modReg2' nextInt1' fd3
+    where   (modReg1', nextInt1, fd1) = fdSecondStage  modReg1 n fd
+            (modReg2', nextInt2, fd2) = fdSecondStage  modReg2 nextInt1 fd1
+            (modReg1'', nextInt1', fd3) = fdFirstStage modReg1' nextInt2 fd2
+            (modReg2'', nextInt2', fd4) = fdFirstStage modReg2' nextInt1' fd3
+            
             (_,(a21,a22),a3,_,_) = getRegInfo modReg1''
             (_,(b21,b22),b3,_,_) = getRegInfo modReg2''
                                     
@@ -242,23 +245,22 @@ fdSecondStage ModEmptyChar n fd = (ModEmptyChar, n, fd)
 ldRoot :: ModRegExpr -> NextInt -> LastData -> (ModRegExpr, NextInt, LastData)
 
 ldRoot (ModKleene (_, modReg)) n ld = (ModKleene ((True,a2,a3,a4,False), modReg''), nextInt', ld2) 
-    where   (modReg', nextInt, ld1) = ldFirstStage modReg n ld
-            (modReg'', nextInt', ld2) = ldSecondStage modReg' nextInt ld1
+    where   (modReg', nextInt, ld1) = ldSecondStage modReg n ld
+            (modReg'', nextInt', ld2) = ldFirstStage modReg' nextInt ld1
             (_,a2,a3,a4,_) = getRegInfo modReg''
 
 ldRoot (ModConcat ((containsE, ldInfo,_,posList,_), (modReg1, modReg2))) n ld
-    | getModContainsE modReg2 = let (modReg2', nextInt2, ld1) = ldFirstStage modReg2 n ld
-                                    (modReg1', nextInt1, ld2) = ldFirstStage modReg1 nextInt2 ld1
-                                    (modReg2'', nextInt2', ld3) = ldSecondStage modReg2' nextInt1  ld2
-                                    (modReg1'', nextInt1', ld4) = ldSecondStage modReg1' nextInt2' ld3
-                                    
+    | getModContainsE modReg2 = let (modReg2', nextInt2, ld1) = ldSecondStage modReg2 n  ld
+                                    (modReg1', nextInt1, ld2) = ldSecondStage modReg1 nextInt2 ld1
+                                    (modReg2'', nextInt2', ld3) = ldFirstStage modReg2' nextInt1 ld2
+                                    (modReg1'', nextInt1', ld4) = ldFirstStage modReg1' nextInt2' ld3
                                     (_,_,(a31,a32),_,_) = getRegInfo modReg1''
                                     (_,_,(b31,b32),_,_) = getRegInfo modReg2''  in
                                     (ModConcat ((containsE, ldInfo, (a31, a32+b32),posList,False), (modReg1'', modReg2'')), nextInt1', ld4)
     
-    | otherwise = let   (modReg2', nextInt, ld1)  = ldFirstStage modReg2 n ld 
-                        (modReg2'', nextInt', ld2) = ldSecondStage modReg2' nextInt ld1
-                        (modReg1', nextInt'', ld3) = ldRoot modReg1 nextInt' ld2
+    | otherwise = let   (modReg2'', nextInt, ld1) = ldSecondStage modReg2' n ld
+                        (modReg1', nextInt', ld2) = ldRoot modReg1 nextInt ld1
+                        (modReg2', nextInt'', ld3)  = ldFirstStage modReg2 nextInt' ld2
                         (_,_,a3,_,_) = getRegInfo modReg2'' in
                         (ModConcat ((containsE, ldInfo, a3, posList, False), (modReg1', modReg2'')), nextInt'', ld3)
 
@@ -269,10 +271,10 @@ ldRoot (ModUnion ((containsE, ldInfo,_,posList,_), (modReg1, modReg2))) n ld = c
         ModEmptyChar -> (ModUnion ((True, ldInfo, (a31,a32),posList,False), (modReg1'', modReg2'')), nextInt1', ld4)
         _ -> (ModUnion ((containsE, ldInfo, (a31, a32+b32), posList,False), (modReg1'', modReg2'')), nextInt1', ld4)
     
-    where   (modReg2', nextInt2, ld1) = ldFirstStage modReg2 n ld
-            (modReg1', nextInt1, ld2) = ldFirstStage modReg1  nextInt2  ld1
-            (modReg2'', nextInt2', ld3) = ldSecondStage  modReg2' nextInt1  ld2
-            (modReg1'', nextInt1', ld4) = ldSecondStage  modReg1' nextInt2' ld3
+    where   (modReg2', nextInt2, ld1) = ldSecondStage  modReg2 n  ld
+            (modReg1', nextInt1, ld2) = ldSecondStage  modReg1 nextInt2 ld1
+            (modReg2'', nextInt2', ld3) = ldFirstStage modReg2' nextInt1 ld2
+            (modReg1'', nextInt1', ld4) = ldFirstStage modReg1' nextInt2'  ld3
             (_,_,(a31,a32),_,_) = getRegInfo modReg1''
             (_,_,(b31,b32),_,_) = getRegInfo modReg2''
                                     
@@ -370,8 +372,8 @@ constructCFS cfs nextInt flInfo fsInfo (fBool,f1,f2,fnum) (lBool,l1,l2,lnum) fLi
                     (MyJust fsfInfo, MyJust fslInfo) -> rootlistUpdate (fBool,f1,f2,fnum) (MyJust fsfInfo) (lBool,l1,l2,lnum) (MyJust fslInfo) True True
                     _ -> ((f1,f2,fnum), (l1,l2,lnum))
             (flf, fll) = flInfo
-            fFollowSet = constructFollowSet flf (f2 ++ f1')
-            lFollowSet = constructFollowSet fll (l2 ++ l1')
+            fFollowSet = constructFollowSet flf (f1' ++ f2)
+            lFollowSet = constructFollowSet fll (l1' ++ l2)
             b1 = null lList || null fFollowSet
             b2 = null fList || null lFollowSet
 
@@ -506,15 +508,70 @@ cfsConstructionBaseCase ModEmptyChar _ _ _ = error "cfsConstructionBaseCase : Go
 ----------------------------------------------- Step 4: Constructing the NFA -----------------------------------------------------
 ----------------------------------------------------------------------------------------------------------------------------------
 
+type PosTransitions = [(StateId, StateId, Position)]
+
 --After the construction of the CFS system for the regex R, find the numbers which belong to first(R) and the numbers which belong to the last(R)
 --Then create for each number in 
 
+--Return a list of the positions which belong to first(R)
+findFirst :: FirstDataInfo -> FirstData -> [Position]
 
-----------------------------------------------------------------------------------------------------------------------------------
------------------------------------ Step 5: Removing the linearization from the NFA ----------------------------------------------
-----------------------------------------------------------------------------------------------------------------------------------
+findFirst (firstPos, firstNum) list = myReverse (myTake (myDrop list (firstPos-1)) firstNum)
+
+--Return a set of the positions whch belong to last(R)
+findLast :: LastDataInfo -> LastData -> Set Position
+
+findLast (lastPos, lastNum) list = setFromList (myTake (myDrop list (lastPos-1)) lastNum)
+
+constructTransitions :: CFSSystem -> [Position] -> Set Position -> NextInt -> NumOfPositions -> PosTransitions
+
+constructTransitions cfs first last n numPos = transitions
+    where   dict = myFoldl (\dict x -> dictInsert (x, [n | setLookup x last]) dict) dictEmpty [1..numPos]
+            firstInitDict = dictInsert (1, first) dictEmpty
+            cfsInfo = myFoldr constructTransitions' (dict, firstInitDict) cfs 
+            f = constructStateTransitions cfsInfo
+            transitions = myConcat. myFoldr (\stateId list -> f stateId:list ) [] $ [1..(n-1)]
 
 
+constructStateTransitions :: CFSInformation -> StateId -> PosTransitions
+constructStateTransitions (posDict, statesDict) stateId = transitions
+    where   MyJust posList = dictLookup stateId statesDict
+            f = constructStatePosTransitions posDict stateId
+            transitions = myConcat . myFoldr (\pos list -> f pos :list) [] $  posList
+
+constructStatePosTransitions :: Dict Position [StateId] -> StateId -> Position -> PosTransitions
+constructStatePosTransitions posDict stateId pos = myFoldr (\x list -> (stateId, x, pos):list) [] stateList
+    where MyJust stateList = dictLookup pos posDict
+
+
+type CFSInformation = (Dict Position [StateId], Dict StateId [Position])
+constructTransitions' :: CFSTuple -> CFSInformation -> CFSInformation
+
+constructTransitions' (stateId, followSet, cfsList) (posDict, statesDict) = (posDict', statesDict')
+    where   posDict' = myFoldr (\x dict -> dictUpdate x (stateId : ) dict)  posDict followSet
+            statesDict' = dictInsert (stateId, cfsList)  statesDict 
+
+-- cfsConstructionAfterRec :: ModRegExpr -> IndexedInfo -> CFSSystem -> NextInt -> FStarInfo -> CFSResult
+
+makeLinearNFATransitions :: ModRegExpr -> (NextInt, PosTransitions)
+makeLinearNFATransitions reg = (nextInt, transitions)
+    where   n = getNumOfPositions reg
+            (reg' ,_, fdlist) = fdRoot reg  n [] 
+            (reg'',_, ldlist) = ldRoot reg' n []
+            (_, cfs, nextInt, _)  = cfsConstruction reg'' (myZip fdlist [1..n], myZip ldlist [1..n]) [] 2 (MyNothing, MyNothing)
+            firstList = findFirst (getFdInfo reg'') fdlist
+            lastSet = findLast (getLdInfo reg'') ldlist
+            transitions = constructTransitions cfs firstList lastSet nextInt n
+
+makeNFA :: [Char] -> Fsa
+makeNFA str
+    | reg == ModEmptyChar = ([1], [], [], 1, [])
+    | otherwise = ([1..numberOfStates], inputs, transitions', 1, [ 1 |getModContainsE reg] ++ [numberOfStates]) 
+    where   (linearMap, _, reg) = simplifyRegexInitialisation . parseRegexpr  $ str
+            (numberOfStates, transitions) = makeLinearNFATransitions reg
+            linearDict = dictFromList  linearMap
+            inputs = setPruneDuplicates (myMap mySnd linearMap)
+            transitions' = myFoldr (\(x,y,z) acc -> let MyJust chr = dictLookup z linearDict in (x,y,chr):acc) [] transitions
 
 
 ----------------------------------- Some functions used for testing the code written ---------------------------------------------
@@ -527,8 +584,9 @@ testing1 :: [Char] -> (NextInt, NextInt, ModRegExpr, IndexedFirstData, IndexedLa
 testing1 regex = (a1,a2, reg'', myZip fdlist [1..n], myZip ldlist [1..n])
     where   (l, _, reg) = testing regex
             n = getNumOfPositions reg
+            
             (reg',a1, fdlist) = fdRoot reg n [] 
-            (reg'',a2, ldlist) = ldRoot reg' n []
+            (reg'',a2, ldlist) = ldRoot reg' n []  
 
 {- 
 type CFSResult = (ModRegExpr, CFSSystem, NextInt, IndexedInfo, NumPosRem, (Bool,[FirstDataInfo],Int), (Bool,[LastDataInfo],Int), FirstList, LastList)
@@ -537,7 +595,11 @@ cfsConstructionAfterRec :: ModRegExpr -> IndexedInfo -> CFSSystem -> NextInt -> 
 -}
 
 
-testing2 :: [Char] -> (CFSSystem)
-testing2 regex = (cfs)
-    where   (a1,a2, reg, indexedFd, indexedLd) = testing1 regex
-            (reg', cfs, nextInt, k) = cfsConstruction reg (indexedFd, indexedLd) [] 1 (MyNothing, MyNothing)
+testing2 :: [Char] -> CFSSystem
+testing2 regex = cfs
+   where   (a1,a2, reg, indexedFd, indexedLd) = testing1 regex
+           (reg', cfs, nextInt, k) = cfsConstruction reg (indexedFd, indexedLd) [] 1 (MyNothing, MyNothing)
+
+
+flipTuple :: [(a, c, b)] -> [(a, b, c)]
+flipTuple = myFoldr (\(x,y,z) acc -> (x,z,y):acc) []

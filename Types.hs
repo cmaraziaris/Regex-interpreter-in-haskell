@@ -1,4 +1,3 @@
-
 module Types
 (
   StateId,

@@ -2,6 +2,8 @@ module Utilities
 (   myMap,
     myFoldl,
     myFoldr,
+    myDrop,
+    myTake,
     myDropWhile,
     myTakeWhile,
     myReverse,
@@ -16,6 +18,7 @@ module Utilities
     mergeSortBy,
     mergeSort,
     removeDuplicates,
+    removeDuplicates',
     MyOrdering(..),
     MyMaybe(..)
 ) where
@@ -41,6 +44,16 @@ myFoldl f acc (x:xs) = myFoldl f (f acc x) xs
 myFoldr :: (a -> b -> b) -> b -> [a] -> b
 myFoldr _ acc [] = acc
 myFoldr f acc (x:xs) = f x (myFoldr f acc xs)
+
+myDrop :: [a] -> Int -> [a]
+myDrop l 0 = l
+myDrop [] n = []
+myDrop (x:xs) n = myDrop xs (n-1)
+
+myTake :: [a] -> Int -> [a]
+myTake l 0 = []
+myTake [] n = []
+myTake (x:xs) n = x : myTake xs (n-1)
 
 myDropWhile :: (a -> Bool) -> [a] -> [a]
 myDropWhile _ [] = []

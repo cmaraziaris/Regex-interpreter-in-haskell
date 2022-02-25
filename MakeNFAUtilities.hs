@@ -41,7 +41,8 @@ type IndexedFirstData = [(Position, Index)] -- the FirstData list but every elem
 type IndexedLastData  = [(Position, Index)] -- same as IndexFirstData
 type CFS = [Position] -- the positions the CFS contains
 type FollowList = [Position] -- The positions which have a common follow set (CFS)
-type CFSSystem = [(Int, FollowList, CFS)]   -- The index of the CommonFollowSet, the positions which have in common the CFS as part of their
+type CFSTuple = (Int, FollowList, CFS)
+type CFSSystem = [CFSTuple]   -- The index of the CommonFollowSet, the positions which have in common the CFS as part of their
                                             -- follow-set decomposition, and the CFS itself
 
 -- Functions used for getting specific information from a ModRegExpr
@@ -158,9 +159,9 @@ rootlistUpdate (fbool,f1, f2,fnum) fdInfo (lbool,l1, l2,lnum) ldInfo e1 e2 = cas
         -- the Parent node is KleeneStar
         (MyJust fdInfo', MyJust ldInfo') -> (if fbool then (f1,f2,fnum) else (fdInfo' : filterRootList (f1, fnum) fdInfo',f2,1), if lbool then (l1,l2,lnum) else (ldInfo' : filterRootList (l1, lnum) ldInfo',l2,1))
         -- the parent node of G is of the form G x H
-        (MyJust fdInfo', MyNothing) -> (if fbool then (f1,f2,fnum) else if e1 then (fdInfo' : f1, f2,fnum+1) else (f1, fdInfo' : f2, fnum), (l1,l2,lnum))
+        (MyJust fdInfo', MyNothing) -> (if fbool then (f1,f2,fnum) else if e1 then (fdInfo' : f1, f2,fnum+1) else (f1, fdInfo' : f2, fnum), if e2 then (l1,l2,lnum) else ([], (l1 ++ l2), 0))
         -- the parent node of G is of the form H x G
-        (MyNothing, MyJust ldInfo') -> ((f1,f2,fnum), if lbool then (l1,l2,lnum) else if e2 then (ldInfo' : l1, l2, lnum+1) else (l1, ldInfo' : l2, lnum))
+        (MyNothing, MyJust ldInfo') -> (if e1 then (f1,f2,fnum) else ([], f1 ++ f2, 0), if lbool then (l1,l2,lnum) else if e2 then (ldInfo' : l1, l2, lnum+1) else (l1, ldInfo' : l2, lnum))
         -- the parent node is a Union thus we ignore it
         (MyNothing, MyNothing) -> ((f1,f2,fnum), (l1,l2,lnum)) 
 

@@ -1,4 +1,5 @@
 module DictSet (
+ Dict(..),
  dictEmpty,
  dictNull,
  dictSingleton,
@@ -7,7 +8,9 @@ module DictSet (
  dictFromList,
  dictFlatten,
  dictDelete,
+ dictUpdate,
  --dictHasValidBalance
+ Set(..),
  setEmpty,
  setNull,
  setSingleton,
@@ -32,10 +35,12 @@ data Dict k a = DictNil | DictNode Height k a (Dict k a) (Dict k a) deriving (Eq
 dictEmpty :: Dict k a
 dictEmpty = DictNil
 
+--Checks if dictionary is empty
 dictNull :: Dict k a -> Bool
 dictNull DictNil = True
 dictNull _ = False
 
+--Create a dictionary which contains only one (key,value)
 dictSingleton :: (k,a) -> Dict k a
 dictSingleton (k,a) = DictNode 1 k a DictNil DictNil
 
@@ -46,6 +51,7 @@ dictHeight (DictNode h _ _ _ _) = h
 node :: (k,a) -> Dict k a -> Dict k a -> Dict k a
 node (k,a) tree1 tree2 = DictNode (1 + max (dictHeight tree1) (dictHeight tree2)) k a tree1 tree2
 
+--Insert a (key,value) to dictionary. If the key already exists, replace the current value by the value of (key,value)
 dictInsert :: Ord k => (k,a) -> Dict k a -> Dict k a
 
 dictInsert (k,a) DictNil = dictSingleton (k,a)
@@ -55,12 +61,23 @@ dictInsert (k,a) dictnode@(DictNode h k1 a1 tree1 tree2)
     | k > k1 = dictRotate $  node (k1,a1) tree1 (dictInsert (k,a) tree2)
     | otherwise = DictNode h k a tree1 tree2
 
+-- Checks if a key exists in the dictionary. If it exists, return a "MyJust a" where a is the value of the key. Otherwise return MyNothing 
 dictLookup :: Ord k => k -> Dict k a -> MyMaybe a
 dictLookup _ DictNil = MyNothing
 dictLookup k (DictNode _ k1 a tree1 tree2)
     | k < k1 = dictLookup k tree1
     | k > k1 = dictLookup k tree2
     | otherwise = MyJust a
+
+-- Given a key, apply a function on the value of that key  and return a new value. If the key does not exist, do nothing to the dictionary
+dictUpdate :: Ord k => k -> (a -> a) -> Dict k a -> Dict k a
+
+dictUpdate _ _ DictNil = DictNil
+
+dictUpdate k f dictnode@(DictNode h k1 a1 tree1 tree2)
+    | k < k1 = DictNode h k1 a1 (dictUpdate k f tree1) tree2
+    | k > k1 = DictNode h k1 a1 tree1 (dictUpdate k f tree2)
+    | otherwise = DictNode h k (f a1) tree1 tree2
 
 --dictRangeLookup :: Ord k -> k -> k -> Dict k a -> [(k,a)]
 --dictRangeLookup _ _ DictNil = []
@@ -70,9 +87,11 @@ dictLookup k (DictNode _ k1 a tree1 tree2)
 --    | otherwise 
 --    where 
 
+--Convert a list into a dictionary
 dictFromList :: Ord k => [(k,a)] -> Dict k a
 dictFromList = myFoldr dictInsert dictEmpty
 
+--Unfold a dictionary into a list
 dictFlatten :: Dict k a -> [(k,a)]
 
 dictFlatten dict = dictFlatten' dict []
@@ -99,6 +118,7 @@ dictGetDeleteLeftMost (DictNode _ k a tree1 tree2) =  case r of
                                 _ -> (MyJust (k,a), tree2)
         where (r, newDict) = dictGetDeleteLeftMost tree1
 
+--Delete the key (and its value) from the dictionary. If the key does not exist in the dictinary, change nothing
 dictDelete :: Ord k => k -> Dict k a -> Dict k a
 
 dictDelete _ DictNil = DictNil
@@ -179,5 +199,6 @@ setFlatten = myMap myFst . dictFlatten
 setDelete :: Ord k => k -> Set k -> Set k
 setDelete = dictDelete 
 
+--Transform the list into a set so that duplicates are extinguished and then convert it back into a list
 setPruneDuplicates :: Ord k => [k] -> [k]
 setPruneDuplicates = setFlatten. setFromList 
