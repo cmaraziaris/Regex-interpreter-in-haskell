@@ -55,6 +55,7 @@ produceRegInfo containsE posList = (containsE, (0,0), (0,0), posList, False)
 simplifyRegexInitialisation :: RegExpr -> (LinearisationMap, NextInt, ModRegExpr)
 simplifyRegexInitialisation regExpr = simplifyRegex regExpr 1
 
+
 simplifyRegex :: RegExpr -> NextInt -> (LinearisationMap, NextInt, ModRegExpr)
 
 -- (reg*)* and reg* produce the same language
