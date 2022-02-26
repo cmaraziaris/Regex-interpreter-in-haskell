@@ -7,6 +7,7 @@ module Utilities
     myTake,
     myDropWhile,
     myTakeWhile,
+    myCompare,
     myReverse,
     mySpan,
     myConcat,
@@ -40,7 +41,8 @@ myMap _ [] = []
 myMap f (x:xs) = f x : myMap f xs
 
 myMember :: Eq a => a -> [a] -> Bool
-myMember x = not . null . myDropWhile (x==)
+myMember a [] = False
+myMember a (x:xs) = a == x || myMember a xs
 
 myAny :: (a -> Bool) -> [a] -> Bool
 myAny _ [] = False
