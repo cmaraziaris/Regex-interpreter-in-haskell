@@ -24,11 +24,17 @@ module DictSet (
 where
 
 -- A haskell implementation of balanced Binary Search Trees and the implementation of balanced,ordered set from those trees
+-- Dictionary and Set are used for optimal search since their complexity operations are O(log(n)) which is much better
+-- than the operations on lists which have linear compexity
+-- Of course, there is the cost of the creation of these data structures which is O(n log(n)) but the benefits are worth more
+
+-- Since the dictionary and Set are balanced vinary search trees, it is necessary for the keys to beling to the Ord typeclass
+-- in order for the structures to be able to work properly
 
 import Utilities ( myFoldr, myFoldl, MyMaybe(..), myFst, myZip, myMap )
 
 type Height = Int
-type Balance = Int -- Balance value of a node is in {-1,0,+1}
+type Balance = Int -- Balance value of a node is in {-1,0,+1} in a balanced binary sarch tree
 data Dict k a = DictNil | DictNode Height k a (Dict k a) (Dict k a) deriving (Eq, Show)
 
 --Create an empty Dictionary

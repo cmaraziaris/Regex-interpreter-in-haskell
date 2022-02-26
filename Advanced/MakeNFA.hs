@@ -117,7 +117,19 @@ simplifyRegex _ _ = error "Invalid simplifyRegex argument" -- It's invalid to ge
 -- It is useful to know whether a node is a root node or not of a subtree so that it is known whether the recursion can be stopped
 -- in the construction of the firstdata array/list
 
+-- Modifications to firstData and lastData structures where made. Specifically, the ordering of the trees are changed slightly.
+-- Specifically, for tree T1 which is an ancestor of a tree T2 , the relation T2 < T1 is defined.
+-- However, in this implementation, instead of T2 < T1, T1 < T2 is defined. The other definition for the ordering of trees is undefined
+-- Another change is regarding the fdata(T) of a tree. In the paper, fdata(T) are the characters belonging to first(T) from left to right
+-- but in this implementation, the reverse is happening, in other words, fdata(T) is the characters from right to left
 
+-- These changes are done because of the limitations Haskell imposes in the handing of lists. In the construction
+-- of the rootlist in the paper, the pseudocode concatenated from the left and the right of the list elements.
+-- in a specific way such that the rootlist will have specific properties  
+-- However, in haskell, the only operation which does not have a time cost is the concatenation to the left of the list
+-- These changes with a few other modifications, like the rootlist together with the toCheck list as well as the firstStar information,
+-- which are shown to be valid due to deeper study of the problem, allow for the implementation of the algorithm in haskell without any
+-- additionional time compexity (or a noticable increase in running time)
 
 
 type FirstData = [Position]
@@ -383,7 +395,7 @@ cfsConstruction :: ModRegExpr -> IndexedInfo -> CFSSystem -> NextInt -> FStarInf
 
 cfsConstruction subtree flInfo cfsSystem n fsInfo
     -- The case where the initial regex is the EmptyChar. In that case, nothing needs to be done
-    | numPos == 0 =  (ModEmptyChar, [], 0, 0)
+    | numPos == 0 =  (ModEmptyChar, [], 0, 0) -- A base case which will obly happen if the original regex is equivalent to the regex "_"
 
     -- The base case is reached
     | numPos == 1 =  let    (cfs, nextInt) = cfsConstructionBaseCase subtree n fsInfo' cfsSystem in
