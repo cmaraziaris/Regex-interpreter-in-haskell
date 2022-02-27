@@ -26,6 +26,11 @@ module Utilities
     MyMaybe(..)
 ) where
 
+
+------------------------------------------------------------------------------------------------------
+----------------------- My implementation on basic Haskell functions and types------------------------
+------------------------------------------------------------------------------------------------------
+
 data MyMaybe a = MyNothing | MyJust a deriving (Eq,Show,Ord)
 
 data MyOrdering = MyLT | MyEQ | MyGT deriving (Eq,Show,Ord)

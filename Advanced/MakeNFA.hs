@@ -399,23 +399,16 @@ cfsConstruction subtree flInfo cfsSystem n fsInfo
 
     -- The base case is reached
     | numPos == 1 =  let    (cfs, nextInt) = cfsConstructionBaseCase subtree n fsInfo' cfsSystem in
-                            --error (show cfs)
                             (subtractPos (setFlag subtree) 1, cfs, nextInt, 1)
 
     -- The recursion has to be used
     | otherwise = let   (reg', cfs', nextInt, flInfo', k', (fBool,f1,f2,fnum), (lBool,l1,l2,lnum), fList, lList) = cfsConstructionRecCase subtree flInfo cfsSystem n fsInfo' numPos
                         (cfs'', nextInt') = constructCFS cfs' nextInt flInfo' fsInfo' (fBool,f1,f2,fnum) (lBool,l1,l2,lnum) fList lList 
                         (a1, a2, a3, k) = cfsConstruction reg' flInfo' cfs'' nextInt' fsInfo' in
-                        --cerror f l fList lList flInfo'--error $ "Got " ++ (show cfs'')
-                        --error $ "f = " ++ show f ++ " l = " ++ show l ++ " fsInfoNew" ++ show flInfo'
                         (a1, a2, a3, k+k')
 
     where   numPos = getNumOfPositions subtree
-            --fdInfo = getFdInfo subtree
-            --ldInfo = getLdInfo subtree
             fsInfo' = updateFSInfo subtree fsInfo
-            --(_,_,_,(_,posTuple),_) = getRegInfo subtree
-            --(fd, ld) = extractFirstLastPos flInfo1 fdInfo ldInfo
 
 type CFSResult = (ModRegExpr, CFSSystem, NextInt, IndexedInfo, NumPosRem, (Bool,[FirstDataInfo],[FirstDataInfo],Int), (Bool,[LastDataInfo],[LastDataInfo],Int), FirstList, LastList)
 
@@ -425,8 +418,8 @@ type CFSResult = (ModRegExpr, CFSSystem, NextInt, IndexedInfo, NumPosRem, (Bool,
 cfsConstructionAfterRec :: ModRegExpr -> IndexedInfo -> CFSSystem -> NextInt -> FStarInfo -> CFSResult
 
 cfsConstructionAfterRec subtree flInfo cfsSystem n fsInfo
-    -- The case where the initial regex is the EmptyChar. In that case, nothing needs to be done
-    | numPos == 0 =  error "cfsConstructionAfterRec: Got numPos = 0"--(ModEmptyChar, [], 0, ([],[]), 0, (False,[],0), (False,[],0),[],[])
+    -- In this function, numPos == 0 indicates a logical error in the program
+    | numPos == 0 =  error "cfsConstructionAfterRec: Got numPos = 0"
 
     -- The base case is reached
     | numPos == 1 =  let    (cfs, nextInt) = cfsConstructionBaseCase subtree n fsInfo' cfsSystem in
@@ -436,7 +429,6 @@ cfsConstructionAfterRec subtree flInfo cfsSystem n fsInfo
     | otherwise = let   (reg', cfs', nextInt, flInfo', k', (fBool,f1,f2,fnum), (lBool,l1,l2,lnum), fList, lList) = cfsConstructionRecCase subtree flInfo1 cfsSystem n fsInfo' numPos
                         (cfs'', nextInt') = constructCFS cfs' nextInt flInfo' fsInfo' (fBool,f1,f2,fnum) (lBool,l1,l2,lnum) fList lList
                         (a1, a2, a3, k) = cfsConstruction reg' flInfo' cfs'' nextInt' fsInfo' in
-                        --error $ "f = " ++ show f ++ " l = " ++ show l ++ " fsInfoNew" ++ show flInfo'
                         (a1, a2, a3, flInfo2, k+k', (False,[],[],0), (False,[],[],0), fd, ld)
 
     where   numPos = getNumOfPositions subtree
@@ -446,10 +438,6 @@ cfsConstructionAfterRec subtree flInfo cfsSystem n fsInfo
             (_,_,_,(_,posTuple),_) = getRegInfo subtree
             (flInfo1, flInfo2) = separateFirstLastInfo flInfo posTuple
             (fd, ld) = extractFirstLastPos flInfo1 fdInfo ldInfo
-            
-
-            --(containsE, (fdPos,fdNum),(ldPos,ldnum), (posNum, (pos1,pos2)), branchFlag) = getRegInfo subtree
-
 
 -- The recursive step of the recursion 
 cfsConstructionRecCase :: ModRegExpr -> IndexedInfo -> CFSSystem -> NextInt -> FStarInfo -> NumOfPositions -> CFSResult
@@ -587,7 +575,7 @@ makeNfa str
             inputs = setPruneDuplicates (myMap mySnd linearMap)
             transitions' = myFoldr (\(x,y,z) acc -> let MyJust chr = dictLookup z linearDict in (x,y,chr):acc) [] transitions
 
-
+{- 
 ----------------------------------- Some functions used for testing the code written ---------------------------------------------
 
 
@@ -606,8 +594,5 @@ testing1 regex = (a1,a2, reg'', myZip fdlist [1..n], myZip ldlist [1..n])
 testing2 :: [Char] -> CFSSystem
 testing2 regex = cfs
    where   (a1,a2, reg, indexedFd, indexedLd) = testing1 regex
-           (reg', cfs, nextInt, k) = cfsConstruction reg (indexedFd, indexedLd) [] 1 (MyNothing, MyNothing)
-
-
-flipTuple :: [(a, c, b)] -> [(a, b, c)]
-flipTuple = myFoldr (\(x,y,z) acc -> (x,z,y):acc) []
+           (reg', cfs, nextInt, k) = cfsConstruction reg (indexedFd, indexedLd) [] 1 (MyNothing, MyNothing)'
+-}

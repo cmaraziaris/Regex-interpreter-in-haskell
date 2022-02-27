@@ -19,7 +19,9 @@ makeDfa = nfaToDfa . makeNfa
 -- Of course, the conversion from the list to the dictionary has a cost O(n*log(n)) where n = #transitions, so fro very small string inputs
 -- the conversion has a bigger cost, however, for longer inputs to the dfa, the benefits of the dictionary outweight the contruction cost
 
-type TransDict = Dict StateId (Dict TransChar StateId) 
+type TransDict = Dict StateId (Dict TransChar StateId)  -- For each state currState in the transitions of the form (currState, nextState, transChar),
+                                                        -- keep in a dictionary all the transition characters of those transitions and in 
+                                                        -- which nextState they point to
 
 
 --For the implementation of the wildcard, it is important for the current state currState and input character c 
@@ -50,7 +52,7 @@ searchFull dict setFinal (c:str) currState = case nextState of
 -- Bonus: Partial Matching (Also compatible with the WildCard bonus)
 
 regexPartMatch :: ([Char], [Char]) -> [[Char]]
-regexPartMatch (regStr, strPat) = myMap myReverse $ searchPart dict set strPat firstState ""
+regexPartMatch (regStr, strPat) = searchPart dict set strPat firstState
     where
       (_,_,transitions, firstState, finalStates) = makeDfa regStr
       dict = transDict transitions
@@ -69,16 +71,16 @@ findNextState dict chr currState = case dictLookup currState  dict of
                     MyNothing -> dictLookup '.' chrDict --bonus: WildCard
                     MyJust newState -> MyJust newState
 
-searchPart :: TransDict -> Set StateId -> String -> StateId -> String -> [String]
-searchPart dict setFinal [] currState  stringSoFar = [stringSoFar | setLookup currState setFinal]
-searchPart dict setFinal (c:str) currState  stringSoFar = case nextState of
+searchPart :: TransDict -> Set StateId -> String -> StateId -> [String]
+searchPart dict setFinal [] currState = ["" | setLookup currState setFinal]
+searchPart dict setFinal (c:str) currState = case nextState of
     MyNothing -> newString
-    MyJust newState -> newString ++ searchPart dict setFinal str newState (c:stringSoFar)
+    MyJust newState -> newString ++ (myMap (c :) $ searchPart dict setFinal str newState)
 
   where 
     nextState = findNextState dict c currState
     isFinalState = setLookup currState setFinal
-    newString = [stringSoFar | isFinalState]
+    newString = ["" | isFinalState]
 
 transDictFoldl :: TransDict -> Transition -> TransDict
 transDictFoldl dict (id1, id2, chr) = case dictLookup id1 dict of
@@ -97,10 +99,10 @@ inputsPart = [("(ab)*", "abababde"), ("(ac|dd)*", "acacddeff")]
 outputsPart = [["", "ab","abab","ababab"], ["","ac","acac","acacdd"]]
 
 test_full :: Bool
-test_full = map regexFullMatch inputsFull == outputsFull
+test_full = myMap regexFullMatch inputsFull == outputsFull
 
 test_part :: Bool
-test_part = map regexPartMatch inputsPart == outputsPart
+test_part = myMap regexPartMatch inputsPart == outputsPart
 
 test_all :: Bool
 test_all = test_full && test_part
