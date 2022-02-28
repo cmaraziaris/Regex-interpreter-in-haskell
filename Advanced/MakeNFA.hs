@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections #-}
 module MakeNFA (
 makeNfa
 --testing,
@@ -24,18 +25,52 @@ makeNfa
 -- of minimizing the transitions of an NFA, since the lower bound is at least Ω(n log(n)) for the number of transitions
 
 --import RegParser (parseRegexpr, RegExpr(EmptyChar, Kleene, Concat, Union, AnyLetter, Letter) )
-import Types
-import Utilities
+import Types ( StateId, Fsa )
 
-import DictSet
+
 
 import RegParser ( parseRegexpr, RegExpr(Letter, Kleene, Concat, Union, EmptyChar, AnyLetter) )
-
+import DictSet
 -- makeNfa = snd. makeNfa' . snd. simplifyRegex. parseRegexpr 
 
 -------------------------  Step 0: Definitions of several algebraic types and renamings which will be used below ---------------------------------
 import MakeNFAUtilities
+    ( CFSTuple,
+      findPath,
+      NumOfPositions,
+      extractFirstLastPos,
+      separateFirstLastInfo,
+      getLdInfo,
+      getFdInfo,
+      updateFSInfo,
+      getNumOfPositions,
+      setFlag,
+      subtractPos,
+      NumPosRem,
+      rootlistUpdate,
+      LastList,
+      FirstList,
+      LastDataInfo,
+      Index,
+      getRegInfo,
+      Position,
+      getModContainsE,
+      FStarInfo,
+      CFSSystem,
+      IndexedInfo,
+      FirstDataInfo,
+      ModRegExpr(..),
+      RegInfo,
+      PositionsList,
+      ContainsE )
 
+import Data.Foldable ( Foldable(foldl') ) -- strict evaluation for efficiency 
+--import Data.IntMap.Lazy (IntMap)
+--import qualified Data.IntMap.Lazy as IntMap
+--import Data.IntSet (IntSet)
+--import qualified Data.IntSet as IntSet
+import Data.Maybe ( fromJust )
+import Utilities ( removeDuplicates )
 ----------------------------------------------------------------------------------------------------------------------------------
 ----------------------------------- Step 1: Simplification and linearisation of the regular expression ---------------------------
 ----------------------------------------------------------------------------------------------------------------------------------
@@ -373,9 +408,6 @@ constructFollowSet l1@((pos,index):l1s) l2@((dataPos, dataNum):l2s)
     | dataPos >  index = constructFollowSet l1s l2
     | otherwise = constructFollowSet l1 l2s 
 
-cerror :: [FirstDataInfo] -> [LastDataInfo] -> FirstList -> LastList  -> IndexedInfo -> a
-cerror f l fList lList flinfo = error $ "f = " ++ show f ++ " l = " ++ show l ++ " fList = " ++ show fList ++ " lList = " ++ show lList ++ " Indexed = " ++ show flinfo
-
 constructCFS :: CFSSystem -> NextInt -> IndexedInfo -> FStarInfo -> (Bool,[FirstDataInfo],[FirstDataInfo],Int) -> (Bool,[LastDataInfo],[LastDataInfo],Int) -> FirstList -> LastList -> (CFSSystem, NextInt)
 constructCFS cfs nextInt flInfo fsInfo (fBool,f1,f2,fnum) (lBool,l1,l2,lnum) fList lList 
     | b1 && b2 = (cfs, nextInt)
@@ -383,7 +415,7 @@ constructCFS cfs nextInt flInfo fsInfo (fBool,f1,f2,fnum) (lBool,l1,l2,lnum) fLi
     | b2 = ((nextInt, lList, fFollowSet):cfs, nextInt+1)
     | otherwise = ((nextInt+1, lFollowSet, fList):(nextInt, lList, fFollowSet):cfs, nextInt+2)
     where   ((f1',_,_), (l1',_,_)) = case fsInfo of
-                    (MyJust fsfInfo, MyJust fslInfo) -> rootlistUpdate (fBool,f1,f2,fnum) (MyJust fsfInfo) (lBool,l1,l2,lnum) (MyJust fslInfo) True True
+                    Just ( fsfInfo, fslInfo) -> rootlistUpdate (fBool,f1,f2,fnum) (Just fsfInfo) (lBool,l1,l2,lnum) (Just fslInfo) True True
                     _ -> ((f1,f2,fnum), (l1,l2,lnum))
             (flf, fll) = flInfo
             fFollowSet = constructFollowSet flf (f1' ++ f2)
@@ -445,26 +477,28 @@ cfsConstructionRecCase :: ModRegExpr -> IndexedInfo -> CFSSystem -> NextInt -> F
 cfsConstructionRecCase (ModKleene ((_,fdinfo, ldinfo,(posNum,posTuple),flag),reg)) flinfo cfsSystem n fsinfo numPos 
     = (ModKleene ((True, fdinfo, ldinfo, (posNum - k',posTuple),flag),reg'), cfs', nextInt, flinfo', k', (fbool,f1',f2',fnum'),(lbool,l1',l2',fnum'), fList, lList)
     where   (reg', cfs', nextInt, flinfo', k', (fbool,f1,f2,fnum), (lbool,l1,l2,lnum), fList, lList) 
-                    = cfsConstructionRecCase reg flinfo cfsSystem n (MyJust fdinfo,MyJust ldinfo) numPos
-            ((f1',f2',fnum'),(l1',l2',lnum')) = rootlistUpdate (fbool,f1,f2,fnum) (MyJust fdinfo) (lbool,l1,l2,lnum) (MyJust ldinfo) True True
+                    = cfsConstructionRecCase reg flinfo cfsSystem n (Just (fdinfo,ldinfo)) numPos
+            ((f1',f2',fnum'),(l1',l2',lnum')) = rootlistUpdate (fbool,f1,f2,fnum) (Just fdinfo) (lbool,l1,l2,lnum) (Just ldinfo) True True
 
 
 cfsConstructionRecCase (ModConcat ((containsE,fdInfo, ldInfo,(posNum,posTuple),flag),(reg1,reg2))) flinfo cfsSystem n fsinfo numPos 
     = (ModConcat ((containsE, fdInfo, ldInfo, (posNum - k',posTuple),flag),(reg1', reg2')), cfs', nextInt, flinfo', k', (fbool',f1',f2',fnum'),(lbool',l1',l2',lnum'), fList, lList)
     where   (e1,e2) = (getModContainsE reg1, getModContainsE  reg2)
             (isLeft, isEnd) = findPath numPos reg1 reg2
-            (fsf, fsl) = fsinfo
-            fsinfoNew = if isLeft then (if e2 then fsf else MyNothing,fsl) else (fsf, if e1 then fsl else MyNothing)
+            f = (isLeft && e2) || (not isLeft && e1)
+            fsinfoNew 
+                | f = fsinfo 
+                | otherwise = Nothing
             reg = if isLeft then reg1 else reg2
             (reg', cfs', nextInt, flinfo', k', (fbool,f1,f2,fnum), (lbool, l1,l2,lnum), fList, lList) = if  isEnd then 
                                                                                                     cfsConstructionAfterRec reg flinfo cfsSystem n fsinfoNew else 
                                                                                                     cfsConstructionRecCase reg flinfo cfsSystem n fsinfoNew numPos
             (reg1', reg2') = if isLeft then (reg', reg2) else (reg1, reg')
-            (fd',ld') = if isLeft then (MyJust (getFdInfo reg2), MyNothing) else (MyNothing, MyJust (getLdInfo reg1))
+            (fd',ld') = if isLeft then (Just (getFdInfo reg2), Nothing) else (Nothing, Just (getLdInfo reg1))
             (fbool',lbool')
-                | isLeft =  if e2 then (fbool, lbool) else (True, lbool)
-                | e1 = (fbool, lbool)
-                | otherwise = (fbool, True)   
+                | f = (fbool, lbool)
+                | otherwise = if isLeft then (True, lbool) else (fbool, True)
+                   
             ((f1',f2',fnum'),(l1',l2',lnum')) = rootlistUpdate (fbool, f1,f2,fnum) fd' (lbool,l1,l2,lnum) ld' e1 e2
 
 cfsConstructionRecCase (ModUnion ((containsE,fdInfo, ldInfo,(posNum,posTuple),flag),(reg1,reg2))) flinfo cfsSystem n fsinfo numPos 
@@ -483,18 +517,17 @@ cfsConstructionRecCase ModEmptyChar _ _ _ _ _ = error "cfsConstructionRecCase: G
 -- Base case for subtree cfs construction when |pos(t)| = 1.
 cfsConstructionBaseCase :: ModRegExpr -> NextInt -> FStarInfo -> CFSSystem -> (CFSSystem, NextInt)
 cfsConstructionBaseCase (Num ((_,(fdpos,fdnum), (ldpos,ldnum),_,_),a)) n fsinfo cfs = case fsinfo of
-    (MyJust (fsfpos,fsfnum),MyJust (fslpos,fslnum)) -> let  f = fsfpos <= fdpos && fsfpos + fsfnum >= fdpos + fdnum -- first(Num a) subset of first(t)
-                                                            l = fslpos <= ldpos && fslpos + fslnum >= ldpos + ldnum in -- last(Num a) subset of last(t)
-                                                            if f && l then ((n,[a],[a]):cfs, n+1) else (cfs,n)
+    Just  ((fsfpos,fsfnum),(fslpos,fslnum)) -> let  f = fsfpos <= fdpos && fsfpos + fsfnum >= fdpos + fdnum   -- first(Num a) subset of first(t)
+                                                    l = fslpos <= ldpos && fslpos + fslnum >= ldpos + ldnum in -- last(Num a) subset of last(t)
+                                                    if f && l then ((n,[a],[a]):cfs, n+1) else (cfs,n)
     _ -> (cfs, n)
 
 
-cfsConstructionBaseCase (ModKleene ((_,fdinfo,ldinfo,_,_),reg)) n _ cfs = cfsConstructionBaseCase reg n (MyJust fdinfo, MyJust ldinfo) cfs
+cfsConstructionBaseCase (ModKleene ((_,fdinfo,ldinfo,_,_),reg)) n _ cfs = cfsConstructionBaseCase reg n (Just (fdinfo, ldinfo)) cfs
 
 cfsConstructionBaseCase (ModConcat (_,(reg1,reg2))) n fsInfo cfs = cfsConstructionBaseCase (if flag then reg2 else reg1) n fsInfoNew cfs 
     where   (_,_,_,_,flag) = getRegInfo reg1
-            (fsf, fsl) = fsInfo
-            fsInfoNew = if not flag then (if getModContainsE reg2 then fsf else MyNothing,fsl) else (fsf, if getModContainsE reg1 then fsl else MyNothing)
+            fsInfoNew = if getModContainsE (if flag then reg1 else reg2) then fsInfo else Nothing
     
 
 cfsConstructionBaseCase (ModUnion (_,(reg1,reg2))) n fsinfo cfs = case reg1 of
@@ -510,6 +543,8 @@ cfsConstructionBaseCase ModEmptyChar _ _ _ = error "cfsConstructionBaseCase : Go
 ----------------------------------------------- Step 4: Constructing the NFA -----------------------------------------------------
 ----------------------------------------------------------------------------------------------------------------------------------
 
+-- An implementation using IntMap and IntSet. It makes the run time slower for some reason so the self made dictionary and set will be used instead
+{-
 type PosTransitions = [(StateId, StateId, Position)]
 
 --After the construction of the CFS system for the regex R, find the numbers which belong to first(R) and the numbers which belong to the last(R)
@@ -518,39 +553,113 @@ type PosTransitions = [(StateId, StateId, Position)]
 --Return a list of the positions which belong to first(R)
 findFirst :: FirstDataInfo -> FirstData -> [Position]
 
-findFirst (firstPos, firstNum) list = myReverse (myTake (myDrop list (firstPos-1)) firstNum)
+findFirst (firstPos, firstNum) = reverse .  take firstNum . drop (firstPos-1)
 
 --Return a set of the positions whch belong to last(R)
-findLast :: LastDataInfo -> LastData -> Set Position
+findLast :: LastDataInfo -> LastData -> IntSet
 
-findLast (lastPos, lastNum) list = setFromList (myTake (myDrop list (lastPos-1)) lastNum)
+findLast (lastPos, lastNum) = IntSet.fromAscList . take lastNum . drop (lastPos-1)
 
-constructTransitions :: CFSSystem -> [Position] -> Set Position -> NextInt -> NumOfPositions -> PosTransitions
+
+
+constructTransitions :: CFSSystem -> [Position] -> IntSet -> NextInt -> NumOfPositions -> PosTransitions
 
 constructTransitions cfs first last n numPos = transitions
-    where   dict = myFoldl (\dict x -> dictInsert (x, [n | setLookup x last]) dict) dictEmpty [1..numPos]
-            firstInitDict = dictInsert (1, first) dictEmpty
-            cfsInfo = myFoldr constructTransitions' (dict, firstInitDict) cfs 
+    where   dict = foldl' (\intMap x -> IntMap.insert x [n |IntSet.member x last] intMap) IntMap.empty [1..numPos]
+            firstInitDict = IntMap.insert 1 first IntMap.empty
+            cfsInfo = foldl' (flip constructTransitions') (dict, firstInitDict) cfs 
             f = constructStateTransitions cfsInfo
-            transitions = myConcat. myFoldr (\stateId list -> f stateId:list ) [] $ [1..(n-1)]
+            transitions = concatMap f [1..(n-1)]
 
 
 constructStateTransitions :: CFSInformation -> StateId -> PosTransitions
 constructStateTransitions (posDict, statesDict) stateId = transitions
-    where   MyJust posList = dictLookup stateId statesDict
+    where   Just posList = IntMap.lookup stateId statesDict
             f = constructStatePosTransitions posDict stateId
-            transitions = myConcat . myFoldr (\pos list -> f pos :list) [] $  posList
+            transitions = concatMap f posList
+
+constructStatePosTransitions :: PosMap -> StateId -> Position -> PosTransitions
+constructStatePosTransitions posDict stateId pos = map (stateId,, pos) stateList
+    where Just stateList = IntMap.lookup pos posDict
+
+type PosMap = IntMap [StateId]
+type StateMap = IntMap [Position]
+type CFSInformation = (PosMap, StateMap)
+constructTransitions' :: CFSTuple -> CFSInformation -> CFSInformation
+
+constructTransitions' (stateId, followSet, cfsList) (posDict, statesDict) = (posDict', statesDict')
+    where   posDict' = foldl' (flip $ IntMap.adjust (stateId : ))  posDict followSet
+            statesDict' = IntMap.insert stateId cfsList  statesDict 
+
+-- cfsConstructionAfterRec :: ModRegExpr -> IndexedInfo -> CFSSystem -> NextInt -> FStarInfo -> CFSResult
+
+makeLinearNFATransitions :: ModRegExpr -> (NextInt, PosTransitions)
+makeLinearNFATransitions reg = (nextInt, transitions)
+    where   n = getNumOfPositions reg
+            (reg' ,_, fdlist) = fdRoot reg  n [] 
+            (reg'',_, ldlist) = ldRoot reg' n []
+            (_, cfs, nextInt, _)  = cfsConstruction reg'' (zip fdlist [1..n], zip ldlist [1..n]) [] 2 Nothing
+            firstList = findFirst (getFdInfo reg'') fdlist
+            lastSet = findLast (getLdInfo reg'') ldlist
+            transitions = constructTransitions cfs firstList lastSet nextInt n
+
+makeNfa :: [Char] -> Fsa
+makeNfa str
+    | reg == ModEmptyChar = ([1], [], [], 1, [1])
+    | otherwise = ([1..numberOfStates], inputs, transitions', 1, [ 1 |getModContainsE reg] ++ [numberOfStates]) 
+    where   (linearMap, _, reg) = simplifyRegexInitialisation . parseRegexpr  $ str
+            (numberOfStates, transitions) = makeLinearNFATransitions reg
+            linearDict = IntMap.fromAscList  linearMap
+            inputs = removeDuplicates (map snd linearMap)
+            transitions' = map (\(x,y,z)->  (x,y,fromJust $ IntMap.lookup z linearDict)) transitions
+
+-}
+
+
+
+
+ ------------------------------------------------------------------------------------------
+type PosTransitions = [(StateId, StateId, Position)]
+
+--After the construction of the CFS system for the regex R, find the numbers which belong to first(R) and the numbers which belong to the last(R)
+--Then create for each number in 
+
+--Return a list of the positions which belong to first(R)
+findFirst :: FirstDataInfo -> FirstData -> [Position]
+
+findFirst (firstPos, firstNum) = reverse . take firstNum . drop  (firstPos-1)
+
+--Return a set of the positions whch belong to last(R)
+findLast :: LastDataInfo -> LastData -> Set Position
+
+findLast (lastPos, lastNum) = setFromList . take lastNum .drop (lastPos-1) 
+
+constructTransitions :: CFSSystem -> [Position] -> Set Position -> NextInt -> NumOfPositions -> PosTransitions
+
+constructTransitions cfs first last n numPos = transitions
+    where   dict = foldl' (\dict x -> dictInsert (x, [n | setLookup x last]) dict) dictEmpty [1..numPos]
+            firstInitDict = dictInsert (1, first) dictEmpty
+            cfsInfo = foldl' (flip constructTransitions') (dict, firstInitDict) cfs 
+            f = constructStateTransitions cfsInfo
+            transitions = concatMap f [1..(n-1)]
+
+
+constructStateTransitions :: CFSInformation -> StateId -> PosTransitions
+constructStateTransitions (posDict, statesDict) stateId = transitions
+    where   Just posList = dictLookup stateId statesDict
+            f = constructStatePosTransitions posDict stateId
+            transitions = concatMap f  posList
 
 constructStatePosTransitions :: Dict Position [StateId] -> StateId -> Position -> PosTransitions
-constructStatePosTransitions posDict stateId pos = myFoldr (\x list -> (stateId, x, pos):list) [] stateList
-    where MyJust stateList = dictLookup pos posDict
+constructStatePosTransitions posDict stateId pos = map (stateId,, pos) stateList
+    where Just stateList = dictLookup pos posDict
 
 
 type CFSInformation = (Dict Position [StateId], Dict StateId [Position])
 constructTransitions' :: CFSTuple -> CFSInformation -> CFSInformation
 
 constructTransitions' (stateId, followSet, cfsList) (posDict, statesDict) = (posDict', statesDict')
-    where   posDict' = myFoldr (\x dict -> dictUpdate x (stateId : ) dict)  posDict followSet
+    where   posDict' = foldl' (\dict x -> dictUpdate x (stateId : ) dict)  posDict followSet
             statesDict' = dictInsert (stateId, cfsList)  statesDict 
 
 -- cfsConstructionAfterRec :: ModRegExpr -> IndexedInfo -> CFSSystem -> NextInt -> FStarInfo -> CFSResult
@@ -560,7 +669,7 @@ makeLinearNFATransitions reg = (nextInt, transitions)
     where   n = getNumOfPositions reg
             (reg' ,_, fdlist) = fdRoot reg  n [] 
             (reg'',_, ldlist) = ldRoot reg' n []
-            (_, cfs, nextInt, _)  = cfsConstruction reg'' (myZip fdlist [1..n], myZip ldlist [1..n]) [] 2 (MyNothing, MyNothing)
+            (_, cfs, nextInt, _)  = cfsConstruction reg'' (zip fdlist [1..n], zip ldlist [1..n]) [] 2 Nothing
             firstList = findFirst (getFdInfo reg'') fdlist
             lastSet = findLast (getLdInfo reg'') ldlist
             transitions = constructTransitions cfs firstList lastSet nextInt n
@@ -572,16 +681,13 @@ makeNfa str
     where   (linearMap, _, reg) = simplifyRegexInitialisation . parseRegexpr  $ str
             (numberOfStates, transitions) = makeLinearNFATransitions reg
             linearDict = dictFromList  linearMap
-            inputs = setPruneDuplicates (myMap mySnd linearMap)
-            transitions' = myFoldr (\(x,y,z) acc -> let MyJust chr = dictLookup z linearDict in (x,y,chr):acc) [] transitions
+            inputs = setPruneDuplicates (map snd linearMap)
+            transitions' = map (\(x,y,z) -> (x,y,fromJust $ dictLookup z linearDict)) transitions
 
 {- 
 ----------------------------------- Some functions used for testing the code written ---------------------------------------------
-
-
 testing :: [Char] -> (LinearisationMap, NextInt, ModRegExpr)
 testing = simplifyRegexInitialisation . parseRegexpr
-
 testing1 :: [Char] -> (NextInt, NextInt, ModRegExpr, IndexedFirstData, IndexedLastData)
 testing1 regex = (a1,a2, reg'', myZip fdlist [1..n], myZip ldlist [1..n])
     where   (l, _, reg) = testing regex
@@ -589,10 +695,9 @@ testing1 regex = (a1,a2, reg'', myZip fdlist [1..n], myZip ldlist [1..n])
             
             (reg',a1, fdlist) = fdRoot reg n [] 
             (reg'',a2, ldlist) = ldRoot reg' n []  
-
-
 testing2 :: [Char] -> CFSSystem
 testing2 regex = cfs
    where   (a1,a2, reg, indexedFd, indexedLd) = testing1 regex
            (reg', cfs, nextInt, k) = cfsConstruction reg (indexedFd, indexedLd) [] 1 (MyNothing, MyNothing)'
 -}
+

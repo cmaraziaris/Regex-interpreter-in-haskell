@@ -22,7 +22,8 @@ module DictSet (
  setPruneDuplicates
 )
 where
-
+import Data.Maybe ( isJust )
+import Data.Foldable ( Foldable(foldl') )
 -- A haskell implementation of balanced Binary Search Trees and the implementation of balanced,ordered set from those trees
 -- Dictionary and Set are used for optimal search since their complexity operations are O(log(n)) which is much better
 -- than the operations on lists which have linear compexity
@@ -31,7 +32,7 @@ where
 -- Since the dictionary and Set are balanced vinary search trees, it is necessary for the keys to beling to the Ord typeclass
 -- in order for the structures to be able to work properly
 
-import Utilities ( myFoldr, myFoldl, MyMaybe(..), myFst, myZip, myMap )
+
 
 type Height = Int
 type Balance = Int -- Balance value of a node is in {-1,0,+1} in a balanced binary sarch tree
@@ -68,12 +69,12 @@ dictInsert (k,a) dictnode@(DictNode h k1 a1 tree1 tree2)
     | otherwise = DictNode h k a tree1 tree2
 
 -- Checks if a key exists in the dictionary. If it exists, return a "MyJust a" where a is the value of the key. Otherwise return MyNothing 
-dictLookup :: Ord k => k -> Dict k a -> MyMaybe a
-dictLookup _ DictNil = MyNothing
+dictLookup :: Ord k => k -> Dict k a -> Maybe a
+dictLookup _ DictNil = Nothing
 dictLookup k (DictNode _ k1 a tree1 tree2)
     | k < k1 = dictLookup k tree1
     | k > k1 = dictLookup k tree2
-    | otherwise = MyJust a
+    | otherwise = Just a
 
 -- Given a key, apply a function on the value of that key  and return a new value. If the key does not exist, do nothing to the dictionary
 dictUpdate :: Ord k => k -> (a -> a) -> Dict k a -> Dict k a
@@ -95,7 +96,7 @@ dictUpdate k f dictnode@(DictNode h k1 a1 tree1 tree2)
 
 --Convert a list into a dictionary
 dictFromList :: Ord k => [(k,a)] -> Dict k a
-dictFromList = myFoldr dictInsert dictEmpty
+dictFromList = foldl' (flip dictInsert) dictEmpty
 
 --Unfold a dictionary into a list
 dictFlatten :: Dict k a -> [(k,a)]
@@ -109,19 +110,19 @@ dictFlatten' (DictNode _ k a tree1 tree2) l = l2
     where   l1 = dictFlatten' tree2 l
             l2 = dictFlatten' tree1 ((k,a):l1)
 
-dictLeftMost :: Dict k a -> MyMaybe (k,a)
+dictLeftMost :: Dict k a -> Maybe (k,a)
 
-dictLeftMost DictNil = MyNothing
+dictLeftMost DictNil = Nothing
 dictLeftMost (DictNode _ k a tree1 tree2) = case tree1 of
-            DictNil -> MyJust (k,a)
+            DictNil -> Just (k,a)
             _ -> dictLeftMost tree1
 
-dictGetDeleteLeftMost :: Ord k => Dict k a -> (MyMaybe (k,a), Dict k a)
+dictGetDeleteLeftMost :: Ord k => Dict k a -> (Maybe (k,a), Dict k a)
 
-dictGetDeleteLeftMost DictNil = (MyNothing, DictNil)
+dictGetDeleteLeftMost DictNil = (Nothing, DictNil)
 dictGetDeleteLeftMost (DictNode _ k a tree1 tree2) =  case r of
-                                MyJust (k1,a1) -> (MyJust (k1,a1), dictRotate $ node (k,a) newDict tree2)
-                                _ -> (MyJust (k,a), tree2)
+                                Just (k1,a1) -> (Just (k1,a1), dictRotate $ node (k,a) newDict tree2)
+                                _ -> (Just (k,a), tree2)
         where (r, newDict) = dictGetDeleteLeftMost tree1
 
 --Delete the key (and its value) from the dictionary. If the key does not exist in the dictinary, change nothing
@@ -132,7 +133,7 @@ dictDelete k1 (DictNode h k a tree1 tree2)
     | k1 < k = dictRotate $ node (k,a) (dictDelete k1 tree1) tree2
     | k1 > k = dictRotate $ node (k,a) tree1 (dictDelete k1 tree2)
     | otherwise = case r of
-                MyJust (k1,a1) -> dictRotate $ node (k1,a1) tree1 newDict
+                Just (k1,a1) -> dictRotate $ node (k1,a1) tree1 newDict
                 _ -> dictRotate tree2
     where (r, newDict) = dictGetDeleteLeftMost tree2
 
@@ -165,19 +166,19 @@ dictRotate dictnode@(DictNode h k a tree1 tree2)
 
 
 perms :: [a] -> [[a]]
-perms = myFoldr permsInsert [[]]
+perms = foldr permsInsert [[]]
 
 permsInsert :: a -> [[a]] -> [[a]]
 
-permsInsert a = myFoldr (++) [] . myMap (permsInsert' a) 
+permsInsert a = concatMap (permsInsert' a) 
 
 permsInsert' :: a -> [a] -> [[a]]
 
 permsInsert' a [] = [[a]]
-permsInsert' a (x:xs) = (a:x:xs) : myMap (x :) (permsInsert' a xs) 
+permsInsert' a (x:xs) = (a:x:xs) : map (x :) (permsInsert' a xs) 
 
 dictCheckValidity :: Ord a => [a] -> Bool
-dictCheckValidity  = and . myMap (dictHasValidBalance . dictFromList. (\l -> myZip l l)) . perms
+dictCheckValidity  = all (dictHasValidBalance . dictFromList. (\l -> zip l l)) . perms
 
 type Set k = Dict k k
 
@@ -194,13 +195,13 @@ setInsert :: Ord k => k -> Set k -> Set k
 setInsert k = dictInsert (k,k)
 
 setLookup :: (Ord k) => k -> Set k -> Bool
-setLookup k set =  dictLookup k set /= MyNothing
+setLookup k set =  Data.Maybe.isJust (dictLookup k set )
 
 setFromList :: Ord k => [k] -> Set k
-setFromList = dictFromList . (\l -> myZip l l)
+setFromList = dictFromList . (\l -> zip l l)
 
 setFlatten ::  Set k -> [k]
-setFlatten = myMap myFst . dictFlatten
+setFlatten = map fst . dictFlatten
 
 setDelete :: Ord k => k -> Set k -> Set k
 setDelete = dictDelete 

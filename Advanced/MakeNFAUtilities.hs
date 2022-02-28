@@ -1,6 +1,6 @@
 module MakeNFAUtilities where
 
-import Utilities
+import Data.List (partition)
 
 type ContainsE = Bool -- Boolean value which checks if a regex can produce the empty string or not
 type BranchingFlag = Bool -- In the recursion step of the construction of the CFS system, check whether this regex belongs to another tree
@@ -75,7 +75,7 @@ getNumOfPositions (ModUnion  ((_, _,_,(num,_),_),_)) = num
 getNumOfPositions (ModConcat ((_, _,_,(num,_),_),_)) = num
 
 
-type FStarInfo = (MyMaybe FirstDataInfo, MyMaybe LastDataInfo)
+type FStarInfo = Maybe ( FirstDataInfo, LastDataInfo)
 type IndexedInfo = (IndexedFirstData, IndexedLastData)
 type FirstList = [Position] -- from subtree t1 with root F1, save first(F1) `intersection` pos(t1) 
 type LastList = [Position]  -- from subtree t1 with root F1, save last(F1)  `intersection` pos(t1)
@@ -87,22 +87,22 @@ type NumPosRem = Int    -- The number |pos(t1)| of the subtree t1 which will be 
 
 -- Update FStarInfo if current subexpression has for root a KleeneStar node 
 updateFSInfo :: ModRegExpr -> FStarInfo -> FStarInfo
-updateFSInfo (ModKleene ((_,fdinfo,ldinfo,_,_),_)) _ = (MyJust fdinfo, MyJust ldinfo)
+updateFSInfo (ModKleene ((_,fdinfo,ldinfo,_,_),_)) _ = Just (fdinfo, ldinfo)
 --updateFSInfo (ModConcat )
 updateFSInfo _ fsinfo = fsinfo
 
 extractFirstLastPos :: IndexedInfo -> FirstDataInfo -> LastDataInfo -> (FirstList, LastList)
-extractFirstLastPos (indexedFd, indexedLd) (fdPos, fdNum) (ldPos, ldNum) = (myMap myFst fd, myMap myFst ld)
+extractFirstLastPos (indexedFd, indexedLd) (fdPos, fdNum) (ldPos, ldNum) = (map fst fd, map fst ld)
     where   p_fd (_,n) =  fdPos <= n && n <= fdPos + (fdNum -1)
             p_ld (_,n) =  ldPos <= n && n <= ldPos + (ldNum -1)
-            fd = myFilter p_fd indexedFd
-            ld = myFilter p_ld indexedLd
+            fd = filter p_fd indexedFd
+            ld = filter p_ld indexedLd
 
 separateFirstLastInfo :: IndexedInfo -> (Position,Position) -> (IndexedInfo,IndexedInfo)
 separateFirstLastInfo (indexedFd, indexedLd) (pos1, pos2) = ((fd1,ld1), (fd2,ld2))
     where   p (n,_) = n >= pos1 && n <= pos2
-            (fd1, fd2) = mySeparate p indexedFd
-            (ld1, ld2) = mySeparate p indexedLd
+            (fd1, fd2) = partition p indexedFd
+            (ld1, ld2) = partition p indexedLd
 
 setFlag :: ModRegExpr -> ModRegExpr
 setFlag ModEmptyChar = error "setFlag: Got ModEmptyChar"
@@ -147,21 +147,21 @@ findPath numPos reg1 reg2
 -- Filter the rootlist
 filterRootList :: ([(Int, Int)], Int) -> (Int, Int) -> [(Int, Int)]
 filterRootList (l,0) tuple = l
-filterRootList ((dataPos,dataNum):l,n) tuple@(dataPos', dataNum') = if f then filteredL else (dataPos,dataNum):filteredL
+filterRootList ((dataPos,dataNum):l,n) tuple@(dataPos', dataNum') = [(dataPos,dataNum) | f] ++ filteredL
     where   filteredL = filterRootList (l,n-1) tuple 
             f = dataPos' <= dataPos && dataPos' + dataNum' >= dataPos + dataNum -- (f/l)data is subset of (f/l)data' 
 
 filterRootList _ _ = error "filterRootList; Got [[],n] with n > 0 which should not happen" -- a case which will never happem
 
-rootlistUpdate :: (Bool,[FirstDataInfo], [FirstDataInfo], Int) -> MyMaybe FirstDataInfo -> (Bool,[LastDataInfo], [LastDataInfo],Int) -> MyMaybe LastDataInfo -> ContainsE -> ContainsE -> (([FirstDataInfo], [FirstDataInfo], Int), ([LastDataInfo], [LastDataInfo], Int))
+rootlistUpdate :: (Bool,[FirstDataInfo], [FirstDataInfo], Int) -> Maybe FirstDataInfo -> (Bool,[LastDataInfo], [LastDataInfo],Int) -> Maybe LastDataInfo -> ContainsE -> ContainsE -> (([FirstDataInfo], [FirstDataInfo], Int), ([LastDataInfo], [LastDataInfo], Int))
 
 rootlistUpdate (fbool,f1, f2,fnum) fdInfo (lbool,l1, l2,lnum) ldInfo e1 e2 = case (fdInfo,ldInfo) of
         -- the Parent node is KleeneStar
-        (MyJust fdInfo', MyJust ldInfo') -> (if fbool then (f1,f2,fnum) else (fdInfo' : filterRootList (f1, fnum) fdInfo',f2,1), if lbool then (l1,l2,lnum) else (ldInfo' : filterRootList (l1, lnum) ldInfo',l2,1))
+        (Just fdInfo', Just ldInfo') -> (if fbool then (f1,f2,fnum) else (fdInfo' : filterRootList (f1, fnum) fdInfo',f2,1), if lbool then (l1,l2,lnum) else (ldInfo' : filterRootList (l1, lnum) ldInfo',l2,1))
         -- the parent node of G is of the form G x H
-        (MyJust fdInfo', MyNothing) -> (if fbool then (f1,f2,fnum) else if e1 then (fdInfo' : f1, f2,fnum+1) else (f1, fdInfo' : f2, fnum), if e2 then (l1,l2,lnum) else ([], (l1 ++ l2), 0))
+        (Just fdInfo', Nothing) -> (if fbool then (f1,f2,fnum) else if e1 then (fdInfo' : f1, f2,fnum+1) else (f1, fdInfo' : f2, fnum), if e2 then (l1,l2,lnum) else ([], (l1 ++ l2), 0))
         -- the parent node of G is of the form H x G
-        (MyNothing, MyJust ldInfo') -> (if e1 then (f1,f2,fnum) else ([], f1 ++ f2, 0), if lbool then (l1,l2,lnum) else if e2 then (ldInfo' : l1, l2, lnum+1) else (l1, ldInfo' : l2, lnum))
+        (Nothing, Just ldInfo') -> (if e1 then (f1,f2,fnum) else ([], f1 ++ f2, 0), if lbool then (l1,l2,lnum) else if e2 then (ldInfo' : l1, l2, lnum+1) else (l1, ldInfo' : l2, lnum))
         -- the parent node is a Union thus we ignore it
-        (MyNothing, MyNothing) -> ((f1,f2,fnum), (l1,l2,lnum)) 
+        (Nothing, Nothing) -> ((f1,f2,fnum), (l1,l2,lnum)) 
 

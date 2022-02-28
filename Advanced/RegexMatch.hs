@@ -3,9 +3,15 @@ module RegexMatch (regexFullMatch, regexPartMatch, test_all) where
 import MakeNFA
 import NFAtoDFA
 import Types
-import Utilities
 
-import DictSet 
+import Data.Foldable ( Foldable(foldl') )
+import Control.Monad ( MonadPlus(mplus) )
+import Data.IntMap.Lazy (IntMap)
+import qualified Data.IntMap.Lazy as IntMap
+import Data.IntSet (IntSet)
+import qualified Data.IntSet as IntSet
+import Data.Maybe 
+import Data.Char (ord, chr)
 
 --makeDfa constructs a dfa using the natural tactic. Construct an equivalent nfa and then transform it into an dfa
 makeDfa :: [Char] -> Fsa
@@ -19,7 +25,8 @@ makeDfa = nfaToDfa . makeNfa
 -- Of course, the conversion from the list to the dictionary has a cost O(n*log(n)) where n = #transitions, so fro very small string inputs
 -- the conversion has a bigger cost, however, for longer inputs to the dfa, the benefits of the dictionary outweight the contruction cost
 
-type TransDict = Dict StateId (Dict TransChar StateId)  -- For each state currState in the transitions of the form (currState, nextState, transChar),
+-- type TransDict = Dict StateId (Dict TransChar StateId)
+type StatePosMap = IntMap (IntMap StateId)  -- For each state currState in the transitions of the form (currState, nextState, transChar),
                                                         -- keep in a dictionary all the transition characters of those transitions and in 
                                                         -- which nextState they point to
 
@@ -34,19 +41,17 @@ regexFullMatch (regStr, strPat) = searchFull dict set strPat firstState
     where
       (_,_,transitions, firstState, finalStates) = makeDfa regStr
       dict = transDict transitions
-      set = setFromList finalStates
+      set = IntSet.fromList finalStates
 
 
 
-searchFull :: TransDict -> Set StateId -> String -> StateId-> Bool
-searchFull dict setFinal [] currState = setLookup currState setFinal
-searchFull dict setFinal (c:str) currState = case nextState of
-    MyNothing -> False
-    MyJust newState -> searchFull dict setFinal str newState
+searchFull :: StatePosMap -> IntSet -> String -> StateId-> Bool
+searchFull dict setFinal [] currState = IntSet.member currState setFinal
+searchFull dict setFinal (c:str) currState = maybe False (searchFull dict setFinal str) nextState
 
   where 
     nextState = findNextState dict c currState
-    isFinalState = setLookup currState setFinal
+    isFinalState = IntSet.member currState setFinal
 
 
 -- Bonus: Partial Matching (Also compatible with the WildCard bonus)
@@ -56,7 +61,7 @@ regexPartMatch (regStr, strPat) = searchPart dict set strPat firstState
     where
       (_,_,transitions, firstState, finalStates) = makeDfa regStr
       dict = transDict transitions
-      set = setFromList finalStates
+      set = IntSet.fromList finalStates
 
 
 --regexPartMatch1 :: ([Char], [Char]) -> [[Char]]
@@ -64,31 +69,23 @@ regexPartMatch (regStr, strPat) = searchPart dict set strPat firstState
 --    where
 --      (_,_,transitions, firstState, finalStates) = makeDfa1 regStr
 
-findNextState :: TransDict -> TransChar -> StateId -> MyMaybe StateId
-findNextState dict chr currState = case dictLookup currState  dict of
-    MyNothing -> MyNothing
-    MyJust chrDict -> case dictLookup chr chrDict of
-                    MyNothing -> dictLookup '.' chrDict --bonus: WildCard
-                    MyJust newState -> MyJust newState
+findNextState :: StatePosMap -> TransChar -> StateId -> Maybe StateId
+findNextState dict chr currState = IntMap.lookup currState  dict >>= (\chrDict -> mplus (IntMap.lookup (ord chr) chrDict) (IntMap.lookup (ord '.') chrDict))
 
-searchPart :: TransDict -> Set StateId -> String -> StateId -> [String]
-searchPart dict setFinal [] currState = ["" | setLookup currState setFinal]
-searchPart dict setFinal (c:str) currState = case nextState of
-    MyNothing -> newString
-    MyJust newState -> newString ++ (myMap (c :) $ searchPart dict setFinal str newState)
+searchPart :: StatePosMap -> IntSet -> String -> StateId -> [String]
+searchPart dict setFinal [] currState = ["" | IntSet.member currState setFinal]
+searchPart dict setFinal (c:str) currState = newString ++ maybe [] (map (c :) . searchPart dict setFinal str) nextState
 
   where 
     nextState = findNextState dict c currState
-    isFinalState = setLookup currState setFinal
+    isFinalState = IntSet.member currState setFinal
     newString = ["" | isFinalState]
 
-transDictFoldl :: TransDict -> Transition -> TransDict
-transDictFoldl dict (id1, id2, chr) = case dictLookup id1 dict of
-    MyNothing -> dictInsert  (id1, dictSingleton (chr, id2)) dict
-    _ -> dictUpdate id1 (dictInsert (chr, id2)) dict
+transDictFoldl :: StatePosMap -> Transition -> StatePosMap
+transDictFoldl dict (id1, id2, chr) = IntMap.insertWith (\_ y -> IntMap.insert (ord chr) id2 y) id1 (IntMap.singleton (ord chr) id2) dict
 
-transDict :: Transitions -> TransDict
-transDict = myFoldl transDictFoldl dictEmpty
+transDict :: Transitions -> StatePosMap
+transDict = foldl' transDictFoldl IntMap.empty
 
 
 
@@ -99,10 +96,10 @@ inputsPart = [("(ab)*", "abababde"), ("(ac|dd)*", "acacddeff")]
 outputsPart = [["", "ab","abab","ababab"], ["","ac","acac","acacdd"]]
 
 test_full :: Bool
-test_full = myMap regexFullMatch inputsFull == outputsFull
+test_full = map regexFullMatch inputsFull == outputsFull
 
 test_part :: Bool
-test_part = myMap regexPartMatch inputsPart == outputsPart
+test_part = map regexPartMatch inputsPart == outputsPart
 
 test_all :: Bool
 test_all = test_full && test_part

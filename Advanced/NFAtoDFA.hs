@@ -21,8 +21,15 @@
 module NFAtoDFA (nfaToDfa) where
 
 import Types
+    ( StateId,
+      Fsa,
+      FirstState,
+      Inputs,
+      LastStates,
+      States,
+      TransChar,
+      Transitions )
 import RegParser (parseRegexpr, RegExpr(..))
-import Utilities
 import MakeNFA (makeNfa)
 
 --Sorting the transitions will not be useful since the regex matching will use the directory structure which does not need an initial sorting
@@ -58,9 +65,9 @@ translateSetsToInts finalNFAStates setStates setTransitions initSetState = (intS
   where
     totalSetStates = length setStates
     intStates = [1..totalSetStates]
-    mapping = myZip setStates intStates
+    mapping = zip setStates intStates
     convertSetTransToInt (srcSet, destSet, char) = ( getSetToIntMapping mapping srcSet, getSetToIntMapping mapping destSet, char )
-    intTransitions = myMap convertSetTransToInt setTransitions
+    intTransitions = map convertSetTransToInt setTransitions
     intInitState = getSetToIntMapping mapping initSetState
     intFinalStates = getFinalIntStates mapping finalNFAStates
 
@@ -73,7 +80,7 @@ getSetToIntMapping [] setToMap = error "getSetToIntMapping : Got [] as first arg
 getFinalIntStates :: [(States, StateId)] -> States -> [StateId]
 getFinalIntStates [] _ = []
 getFinalIntStates ((set,int):restMapping) finalNFAStates 
-    | myAny  (`myMember` finalNFAStates) set = int : checkRest
+    | any  (`elem` finalNFAStates) set = int : checkRest
     | otherwise = checkRest
     where
       checkRest = getFinalIntStates restMapping finalNFAStates
@@ -102,7 +109,7 @@ expandState :: States -> Transitions -> Inputs -> [States] -> ([SetTransition], 
 expandState stateToExpand transitions inputs setStates = (newTrans, newReachableStates)
   where 
     newTrans = filter (\(x,y,z) -> y /= [] && x /= []) [ getSetTransitionsReachedWithCharEps symbol transitions stateToExpand | symbol <- inputs ]
-    newReachableStates = filter (\x -> not $ myMember x setStates) . myMap (\(x,y,z) -> y) $ newTrans
+    newReachableStates = filter (`notElem` setStates) . map (\(x,y,z) -> y) $ newTrans
 
 -- Given a set of states `states` and transition character `char`, find all the states that can be reached from the set by consuming `char`
 -- and a number of epsilon transitions.
@@ -112,4 +119,4 @@ getSetTransitionsReachedWithCharEps symbol transitions initStates = (initStates,
 
 -- Given a set of states `states` and transition character `char`, find all the states that can be reached from the set by consuming `char`.
 getStatesReachedWithChar :: Transitions -> TransChar -> States -> States
-getStatesReachedWithChar transitions char states =  myMap (\(x,y,z) -> y) . myFilter (\(x,y,z) -> (z == char || z == '.') && myMember x states) $ transitions
+getStatesReachedWithChar transitions char states =  map (\(x,y,z) -> y) . filter (\(x,y,z) -> (z == char || z == '.') && elem x states) $ transitions
