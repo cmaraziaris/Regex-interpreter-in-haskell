@@ -101,8 +101,8 @@ simplifyRegex (Kleene (Kleene reg)) n = simplifyRegex (Kleene reg) n
 simplifyRegex (Kleene ( Union (reg1, reg2))) n = case reg of
         ModEmptyChar ->  (list, nextInt, ModEmptyChar)
         (ModKleene a) -> (list, nextInt, ModKleene a)
-        (ModUnion (_, (reg1', reg2'))) ->   if getModContainsE reg1' then (list, nextInt, ModKleene (regInfo, reg2')) else 
-                                            if getModContainsE reg2' then (list, nextInt, ModKleene (regInfo, reg1')) else (list, nextInt, ModKleene (regInfo, reg))
+        (ModUnion (_, (reg1', reg2'))) ->   if reg1' == ModEmptyChar then (list, nextInt, ModKleene (regInfo, reg2')) else 
+                                            if reg2' == ModEmptyChar then (list, nextInt, ModKleene (regInfo, reg1')) else (list, nextInt, ModKleene (regInfo, reg))
         _ ->  (list, nextInt, ModKleene (regInfo, reg))
         where   (list, nextInt, reg) = simplifyRegex (Union (reg1, reg2)) n
                 regInfo = produceRegInfo True (nextInt - n,(n, nextInt-1))
